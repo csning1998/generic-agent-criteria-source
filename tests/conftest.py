@@ -24,4 +24,3 @@ def isolate_catalog_path(
         "adapter_install.install.resolve_catalog_path",
         lambda grok_root: empty_catalog,
     )
-

@@ -25,7 +25,9 @@ Foundational execution engine running in the local sandbox VM. Governs determini
 ### 2. C-Level Serialization via `json.dumps`
 - Final serialization into tool call payloads MUST be executed by CPython `json.dumps()`:
   ```python
-  payload_json = json.dumps(payload_dict, ensure_ascii=False, separators=(',', ':'))
+  payload_json = json.dumps(
+      payload_dict, ensure_ascii=False, separators=(",", ":")
+  )
   ```
 - **100% Escaping Immunity**: Handled entirely at the C extension level (`_json.c`). All nested quotes (`"`), newlines (`\n`), and backslashes (`\`) are guaranteed strictly escaped without string boundary collisions.
 - **Token Optimization**: Compact separators `(',', ':')` prune whitespace overhead by 40% to 50%.
@@ -33,8 +35,14 @@ Foundational execution engine running in the local sandbox VM. Governs determini
 ### 3. Algorithmic $O(N + M)$ Set Diffing Engine
 - Replace LLM visual inspection with deterministic hash-set diffing:
   ```python
-  notion_iids = {m for task in notion_tasks for m in re.findall(r'[#!](\d+)\b', task.get("Name", ""))}
-  missing_mrs = [mr for mr in gitlab_mrs if str(mr.get("iid", "")) not in notion_iids]
+  notion_iids = {
+      m
+      for task in notion_tasks
+      for m in re.findall(r"[#!](\d+)\b", task.get("Name", ""))
+  }
+  missing_mrs = [
+      mr for mr in gitlab_mrs if str(mr.get("iid", "")) not in notion_iids
+  ]
   ```
 - Eliminates context-window attention drift, false positives, and dropped items.
 

@@ -219,9 +219,10 @@ def test_catalog_skill_links_beside_repo_skills(
     assert external.is_symlink()
     assert external.resolve() == pack_skill.resolve()
     assert repo_skill.is_symlink()
-    assert repo_skill.resolve() == (
-        _repo_root() / "skills" / "skill-yt-dlp"
-    ).resolve()
+    assert (
+        repo_skill.resolve()
+        == (_repo_root() / "skills" / "skill-yt-dlp").resolve()
+    )
 
 
 def test_contexts_toml_symlinks_for_grok_claude_and_agy() -> None:

@@ -491,9 +491,7 @@ def _is_skills_directory_spec(spec: AdapterSpec) -> bool:
     return spec.source == "skills" and spec.dest == ".grok/skills"
 
 
-def _resolve_skill_links(
-    grok_root: Path, home: Path
-) -> dict[str, Path] | str:
+def _resolve_skill_links(grok_root: Path, home: Path) -> dict[str, Path] | str:
     """Return link name to source path, or an error string."""
     skills = grok_root / "skills"
     links = {child.name: child.resolve() for child in skills.iterdir()}

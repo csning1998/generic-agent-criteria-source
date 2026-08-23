@@ -25,3 +25,9 @@ default_reasoning_effort = "This is overridden by Grok by default"
 
 [compat.claude]
 skills = false
+# Grok must not ingest ~/.claude named instruction files. Claude Code still reads them.
+agents = false
+
+# Cross-harness SKILL.md bodies. Gemini CLI and Kimi Code scan this directory natively.
+[skills]
+paths = ["~/.agents/skills"]

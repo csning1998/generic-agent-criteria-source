@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["hooks"]
-include = ["engineering_principles*"]
+include = ["engineering_principles*", "adapter_install*"]
 
 [tool.ruff]
 # Specify the target Python version
@@ -60,6 +60,7 @@ lines-after-imports = 2
 
 [tool.ruff.lint.per-file-ignores]
 "hooks/bin/engineering-principles.py" = ["E402"]
+"hooks/bin/install-adapters.py" = ["E402"]
 
 [dependency-groups]
 dev = ["ruff>=0.15.20", "pytest>=8"]

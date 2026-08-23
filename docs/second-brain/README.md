@@ -24,6 +24,8 @@ The following names are reserved. A later sentence MUST reuse the reserved name,
 - Income Event means one page in the Income data source.
 - Flexible Expenditure means one page in the Flexible Expenditure data source.
 - Fixed Expenditure means one page in the Fixed Expenditure data source.
+- Expenditure Log means one page in the Expenditure Logs data source.
+- Expenditure Plan means one page in the Expenditure Plans data source.
 - Tasks Inbox Status means the Tasks property `Status` value `Inbox`.
 - Notes Inbox Status means the Notes property `Status` value `Inbox`.
 - Inbox Dashboard means the Catalog page whose `Name` is `Inbox`.
@@ -46,15 +48,15 @@ A writable property is defined in exactly one entity file. IDs live only in `03-
 
 ### Task C. Folder map
 
-| Folder | Metadatabase H2 |
-| --- | --- |
-| `10-years-days-goals-kpis/` | System Databases: Years & Days, Goals & KPIs |
-| `20-tasks-projects-areas/` | System Databases: Tasks, Projects & Areas |
-| `30-habits-journal/` | System Databases: Habits & Journal |
-| `40-finance/` | System Databases: Fiscal Year & Monthly Budget, Income & Expenditures, Allocation & Wishlist |
-| `50-workout-meals/` | System Databases: Workout Tracker & Meal Planner |
-| `60-knowledge/` | System Databases: Knowledge Base: Notes, Topics, Resources, Contacts |
-| `70-extras/` | Outside Metadatabase |
+| Folder                      | Metadatabase H2                                                                          |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `10-years-days-goals-kpis/` | System Databases: Years & Days, Goals & KPIs                                             |
+| `20-tasks-projects-areas/`  | System Databases: Tasks, Projects & Areas                                                |
+| `30-habits-journal/`        | System Databases: Habits & Journal                                                       |
+| `40-finance/`               | System Databases: Fiscal Year & Monthly Budget, Income & Expenditures, Expenditure Plans |
+| `50-workout-meals/`         | System Databases: Workout Tracker & Meal Planner                                         |
+| `60-knowledge/`             | System Databases: Knowledge Base: Notes, Topics, Resources, Contacts                     |
+| `70-extras/`                | Outside Metadatabase                                                                     |
 
 Each H3 under those H2 headings has one locate and fill file. Allocation is unused and has no file.
 
@@ -63,7 +65,7 @@ Each H3 under those H2 headings has one locate and fill file. Allocation is unus
 Two loops consume almost all owner time.
 
 1. Task management at Getting Things Done granularity, with Goal defined from Covey The 7 Habits of Highly Effective People.
-2. Daily bookkeeping through Income Event, Flexible Expenditure, and Fixed Expenditure.
+2. Daily bookkeeping through Income Event, Flexible Expenditure, Fixed Expenditure, and Expenditure Log. Intent sits on Expenditure Plan.
 
 PACST (Plan, Action, Capture, Track, System) is a menu invented by the template author. PACST is not the owner's taxonomy.
 

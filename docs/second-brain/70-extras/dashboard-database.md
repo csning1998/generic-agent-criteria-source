@@ -61,7 +61,7 @@ Formula property `Metadata`.
 | 260  | `Contacts`                        | Getting Things Done                                    | Optional relation                  |
 | 270  | `P.A.R.A Dashboard`               | P.A.R.A, Getting Things Done                           | Menu only                          |
 | 280  | `Archives`                        | P.A.R.A, Retrospective Review                          | Owner-manual                       |
-| 290  | `Wish List`                       | The 7 Habits                                           | Intention, not a ledger event      |
+| 290  | `Expenditure Plans`               | 6 Jars System                                          | Intent. Not a ledger event         |
 | 300  | `Co-Pilot`                        | none                                                   | Ignore unless asked                |
 | 310  | `Tasks Bin`                       | Getting Things Done                                    | Completed or deferred Task history |
 | none | `Ingredients`                     | Atomic Habits                                          | Meal support                       |

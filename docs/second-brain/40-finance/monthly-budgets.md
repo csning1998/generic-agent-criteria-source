@@ -1,6 +1,6 @@
 # Monthly Budgets
 
-Monthly Budget is the smallest reporting container. Every Income Event, Flexible Expenditure, and Fixed Expenditure MUST belong to one Monthly Budget.
+Monthly Budget is the smallest reporting container. Every Income Event, Flexible Expenditure, Fixed Expenditure, Expenditure Log, and Expenditure Plan target period MUST belong to one Monthly Budget. Previous Period forms the month chain.
 
 ## Locate
 
@@ -25,11 +25,12 @@ WHERE Status = 'Live'
 | `Status`              | status   | One of `Not started`, `Live`, `Archived`. Use `Live` for the current month. |
 | `Timeframe`           | date     | Expanded keys covering the calendar month.                                  |
 | `Related Fiscal Year` | relation | Fiscal Years page.                                                          |
+| `Previous Period`     | relation | Limit 1. Prior Monthly Budget. Do not point at the current row.             |
 | `Related Area`        | relation | Optional. Do not set Area `TOP OF MIND`.                                    |
 | `Related Project`     | relation | Optional.                                                                   |
 | `Profit Target`       | number   | New Taiwan Dollar. Leave empty unless the owner set a target.               |
 
-Prefer writing ledger links on Income, Flexible Expenditure, and Fixed Expenditure.
+Prefer writing ledger links on Income, Flexible Expenditure, Fixed Expenditure, and Expenditure Logs.
 
 ## Do not write
 

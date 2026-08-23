@@ -23,6 +23,8 @@ The contract overrides template marketing copy and unused schema. When a live pr
 9. Guess a custom emoji name for Task `icon`. Use the string recorded in `20-tasks-projects-areas/tasks.md`.
 10. Query Knowledge Base Topics when the owner asked for CS Topics, or the reverse. Both live titles are `Topics`.
 11. Write a relation or rollup whose target data source is absent from `03-identifiers.md` or returns `object_not_found`.
+12. Treat an Expenditure Plan as a ledger event. Realization writes an Expenditure Log and sets Plan Status `Realized`.
+13. Set both Related Fixed Expenditure and Related Flexible Expenditure on one Expenditure Log.
 
 ## Write gate
 

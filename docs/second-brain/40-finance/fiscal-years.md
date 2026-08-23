@@ -1,6 +1,6 @@
 # Fiscal Years
 
-Fiscal Years is the finance year container. Monthly Budgets, Income, Subscriptions, and Installments hang from Fiscal Years. Fiscal Years relates to Years.
+Fiscal Years is the finance year container. Monthly Budgets and Income hang from Fiscal Years. Fiscal Years relates to Years.
 
 ## Locate
 
@@ -14,14 +14,12 @@ Fiscal Years is the finance year container. Monthly Budgets, Income, Subscriptio
 
 ## Writable properties an Agent may set
 
-| Property               | Type     | Fill rule                                   |
-| ---------------------- | -------- | ------------------------------------------- |
-| `Fiscal Year`          | title    | Year label already used nearby.             |
-| `Related Year`         | relation | Matching Years page.                        |
-| `Related Budget`       | relation | Prefer writing the link on Monthly Budgets. |
-| `Related Income`       | relation | Prefer writing the link on Income.          |
-| `Related Subscription` | relation | Prefer writing the link on Subscriptions.   |
-| `Related Installment`  | relation | Prefer writing the link on Installments.    |
+| Property         | Type     | Fill rule                                   |
+| ---------------- | -------- | ------------------------------------------- |
+| `Fiscal Year`    | title    | Year label already used nearby.             |
+| `Related Year`   | relation | Matching Years page.                        |
+| `Related Budget` | relation | Prefer writing the link on Monthly Budgets. |
+| `Related Income` | relation | Prefer writing the link on Income.          |
 
 ## Do not write
 

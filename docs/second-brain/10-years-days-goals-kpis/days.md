@@ -1,6 +1,6 @@
 # Days
 
-Days is one row per calendar day. Days holds Stamina, Mood, and One Thing. Days links Habits, Journal, Workout Sessions, and Flexible Expenditure Logs.
+Days is one row per calendar day. Days holds Stamina, Mood, and One Thing. Days links Habits, Journal, Workout Sessions, and Expenditure Logs.
 
 ## Locate
 
@@ -29,7 +29,7 @@ WHERE Day LIKE '%2026%'
 | `Related Habit`                 | relation     | Habits logged on the Days row.                                                                                          |
 | `Related Journal Entry`         | relation     | Journal rows for the Days row.                                                                                          |
 | `Related Workout Session`       | relation     | Workout Sessions for the Days row.                                                                                      |
-| `Related Flexible Expense Logs` | relation     | Flexible Expenditure Logs for the Days row.                                                                             |
+| `Related Flexible Expense Logs` | relation     | Expenditure Logs for the Days row. Flexible carrier only.                                                               |
 
 ## Do not write
 

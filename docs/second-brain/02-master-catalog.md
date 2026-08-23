@@ -23,12 +23,10 @@ Folder numbers follow System Metadatabase H2 order. Extra data sources sit in `7
 | 40 Finance               | Fiscal Years              | `40-finance/fiscal-years.md`                          | Period.                               |
 | 40 Finance               | Monthly Budgets           | `40-finance/monthly-budgets.md`                       | Period.                               |
 | 40 Finance               | Income                    | `40-finance/income.md`                                | Ledger inflow.                        |
-| 40 Finance               | Fixed Expenditure         | `40-finance/fixed-expenditure.md`                     | Ledger committed outflow.             |
-| 40 Finance               | Subscriptions             | `40-finance/subscriptions.md`                         | Commitment definition.                |
-| 40 Finance               | Installments              | `40-finance/installments.md`                          | Commitment definition.                |
+| 40 Finance               | Fixed Expenditure         | `40-finance/fixed-expenditure.md`                     | Standing commitment. Tag Subscription or Installment. |
 | 40 Finance               | Flexible Expenditure      | `40-finance/flexible-expenditure.md`                  | Monthly envelope.                     |
-| 40 Finance               | Flexible Expenditure Logs | `40-finance/flexible-expenditure-logs.md`             | Daily 記帳 line.                      |
-| 40 Finance               | Wish List                 | `40-finance/wish-list.md`                             | Intention. Not cashflow.              |
+| 40 Finance               | Expenditure Logs          | `40-finance/expenditure-logs.md`                      | Daily 記帳 line. Single spend fact.   |
+| 40 Finance               | Expenditure Plans         | `40-finance/expenditure-plans.md`                     | Intent. Not cashflow until realized.  |
 | 50 Workout Meals         | Workout Sessions          | `50-workout-meals/workout-sessions.md`                | Read unless logging.                  |
 | 50 Workout Meals         | Fitness Records           | `50-workout-meals/fitness-records.md`                 | Read.                                 |
 | 50 Workout Meals         | Weights Log               | `50-workout-meals/weights-log.md`                     | Read unless logging.                  |
@@ -46,7 +44,7 @@ Folder numbers follow System Metadatabase H2 order. Extra data sources sit in `7
 | 70 Extras                | Articles                  | `70-extras/articles.md`                               | Computer Science articles. Not Notes. |
 | 70 Extras                | CS Topics                 | `70-extras/cs-topics.md`                              | Distinct from Knowledge Base Topics.  |
 
-Count is 39 data sources. System Metadatabase lists 36. Folder `70-extras/` holds four extras. Time Tracker appears in the Metadatabase ERD as a Task relation, not as a standalone data source. The Google Drive File relation on Tasks returned `object_not_found`.
+Count is 37 data sources. Folder `70-extras/` holds four extras. Time Tracker appears in the Metadatabase ERD as a Task relation, not as a standalone data source. The Google Drive File relation on Tasks returned `object_not_found`.
 
 Knowledge Base Topics and CS Topics share the live title `Topics`. Use the Object column in this table, then the `collection://` ID in `03-identifiers.md`.
 

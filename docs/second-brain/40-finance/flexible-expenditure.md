@@ -1,6 +1,6 @@
 # Flexible Expenditure
 
-Flexible Expenditure is a monthly spend envelope. Actual spend lands on Flexible Expenditure Logs.
+Flexible Expenditure is a monthly spend envelope. Actual spend lands on Expenditure Logs.
 
 ## Locate
 
@@ -13,11 +13,11 @@ Flexible Expenditure is a monthly spend envelope. Actual spend lands on Flexible
 
 ## Writable properties an Agent may set
 
-| Property                  | Type     | Fill rule                                             |
-| ------------------------- | -------- | ----------------------------------------------------- |
-| `Expenditure Title`       | title    | Envelope name.                                        |
-| `Budgeted Expense`        | number   | Planned New Taiwan Dollar amount.                     |
-| `Related Category`        | relation | Required. Limit 1. One Financial Category.            |
-| `Related Budget Month`    | relation | Required. Exactly one Monthly Budget.                 |
-| `Related Expenditure Log` | relation | Prefer creating the log in Flexible Expenditure Logs. |
-| `Related Contact`         | relation | Optional payee.                                       |
+| Property                  | Type     | Fill rule                                    |
+| ------------------------- | -------- | -------------------------------------------- |
+| `Expenditure Title`       | title    | Envelope name.                               |
+| `Budgeted Expense`        | number   | Planned New Taiwan Dollar amount.            |
+| `Related Category`        | relation | Required. Limit 1. One Financial Category.   |
+| `Related Budget Month`    | relation | Required. Exactly one Monthly Budget.        |
+| `Related Expenditure Log` | relation | Prefer creating the log in Expenditure Logs. |
+| `Related Contact`         | relation | Optional payee.                              |

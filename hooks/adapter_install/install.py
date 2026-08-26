@@ -39,8 +39,23 @@ SPECS: tuple[AdapterSpec, ...] = (
         mode=MODE_COPY,
     ),
     AdapterSpec(
+        source="hooks/adapters/claude/gate-check.py",
+        dest=".claude/hooks/gate-check.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
         source="hooks/adapters/skills",
         dest=".agents/skills",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="hooks/criteria",
+        dest=".agents/criteria",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="rules/ENGINEERING_PRINCIPLES.md",
+        dest=".agents/ENGINEERING_PRINCIPLES.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(

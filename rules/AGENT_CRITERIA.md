@@ -1,6 +1,6 @@
 # Agent criteria
 
-Resident distill. Full TITLE text is not loaded. Specs live in `~/.grok/hooks/criteria/`. Collaboration rules stay in `~/.grok/rules/ENGINEERING_PRINCIPLES.md`.
+Resident distill. Full TITLE text is not loaded. Specs live in `~/.agents/criteria/`. Collaboration rules stay in `~/.agents/ENGINEERING_PRINCIPLES.md`.
 
 ## Section 1. Identity and tone
 
@@ -26,7 +26,7 @@ Resident distill. Full TITLE text is not loaded. Specs live in `~/.grok/hooks/cr
 
 ## Section 3. Routing
 
-The matching scenario file and files listed under `load:` MUST be opened. Preloading unrelated scenarios is prohibited. Index resides in `~/.grok/hooks/criteria/00-routing.md`.
+The matching scenario file and files listed under `load:` MUST be opened. Preloading unrelated scenarios is prohibited. Index resides in `~/.agents/criteria/00-routing.md`. If that path cannot be opened, the Agent MUST write 「目前缺乏足夠資訊」, MUST name the path, and MUST stop.
 
 ## Section 4. Coding short list
 

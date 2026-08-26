@@ -1,4 +1,8 @@
 @~/.agents/AGENTS.md
+@~/.agents/criteria/00-routing.md
+@~/.agents/ENGINEERING_PRINCIPLES.md
+
+The sections below belong to this file. They are not part of `AGENTS.md`.
 
 ## Section 1. IDE only (§403)
 

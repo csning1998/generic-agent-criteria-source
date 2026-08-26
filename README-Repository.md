@@ -151,20 +151,22 @@ Run from `${HOME}/.grok`:
 
 ### Item C. Allow-listed destinations
 
-| Source                                    | Dest                      | Mode    |
-| ----------------------------------------- | ------------------------- | ------- |
-| `rules/AGENT_CRITERIA.md`                 | `~/.agents/AGENTS.md`     | symlink |
-| `rules/AGENT_CRITERIA.md`                 | `~/.gemini/GEMINI.md`     | symlink |
-| `hooks/adapters/claude/CLAUDE.md`         | `~/.claude/CLAUDE.md`     | copy    |
-| `hooks/adapters/skills`                   | `~/.agents/skills`        | symlink |
-| `hooks/criteria/references/lang-md.md`    | `~/.claude/lang_md.md`    | symlink |
-| `hooks/criteria/references/lang-hcl.md`   | `~/.claude/lang_hcl.md`   | symlink |
-| `hooks/criteria/references/lang-ts.md`    | `~/.claude/lang_ts.md`    | symlink |
-| `hooks/criteria/references/lang-ipynb.md` | `~/.claude/lang_ipynb.md` | symlink |
-| `hooks/criteria/references/lang-md.md`    | `~/.gemini/lang_md.md`    | symlink |
-| `hooks/criteria/references/lang-hcl.md`   | `~/.gemini/lang_hcl.md`   | symlink |
-| `hooks/criteria/references/lang-ts.md`    | `~/.gemini/lang_ts.md`    | symlink |
-| `hooks/criteria/references/lang-ipynb.md` | `~/.gemini/lang_ipynb.md` | symlink |
+| Source                                    | Dest                                  | Mode    |
+| ----------------------------------------- | ------------------------------------- | ------- |
+| `rules/AGENT_CRITERIA.md`                 | `~/.agents/AGENTS.md`                 | symlink |
+| `rules/AGENT_CRITERIA.md`                 | `~/.gemini/GEMINI.md`                 | symlink |
+| `hooks/adapters/claude/CLAUDE.md`         | `~/.claude/CLAUDE.md`                 | copy    |
+| `hooks/adapters/skills`                   | `~/.agents/skills`                    | symlink |
+| `hooks/criteria`                          | `~/.agents/criteria`                  | symlink |
+| `rules/ENGINEERING_PRINCIPLES.md`         | `~/.agents/ENGINEERING_PRINCIPLES.md` | symlink |
+| `hooks/criteria/references/lang-md.md`    | `~/.claude/lang_md.md`                | symlink |
+| `hooks/criteria/references/lang-hcl.md`   | `~/.claude/lang_hcl.md`               | symlink |
+| `hooks/criteria/references/lang-ts.md`    | `~/.claude/lang_ts.md`                | symlink |
+| `hooks/criteria/references/lang-ipynb.md` | `~/.claude/lang_ipynb.md`             | symlink |
+| `hooks/criteria/references/lang-md.md`    | `~/.gemini/lang_md.md`                | symlink |
+| `hooks/criteria/references/lang-hcl.md`   | `~/.gemini/lang_hcl.md`               | symlink |
+| `hooks/criteria/references/lang-ts.md`    | `~/.gemini/lang_ts.md`                | symlink |
+| `hooks/criteria/references/lang-ipynb.md` | `~/.gemini/lang_ipynb.md`             | symlink |
 
 The Claude destination is copy mode because that file MUST keep `@~/.agents/AGENTS.md` plus §403 and §205(f). Destinations outside this table MUST be rejected. The installer MUST NOT write `settings.json`, `settings.local.json`, `oauth_creds.json`, `auth.json`, `control.key`, `daemon/`, `sessions/`, or `file-history/`. It MUST NOT replace `~/.claude`, `~/.agents`, or `~/.gemini` as a whole.
 

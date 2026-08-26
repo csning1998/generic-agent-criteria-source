@@ -46,7 +46,7 @@ Grok does not load this file at session start. Open it when a task hits more tha
 
 ## Section 3. What is not wired yet
 
-Resident distill, skill bodies, and the Claude thin shell are materialized by `hooks/bin/install-adapters.py`. Claude `.claude/rules`, Cursor `.mdc` files, and the Grok PreToolUse language gate are outside that installer. Those three adapters are not installed yet:
+Resident distill, skill bodies, the Claude thin shell, and `~/.agents/criteria` are materialized by `hooks/bin/install-adapters.py`. Claude `.claude/rules` with `paths:` globs, Cursor `.mdc` files, and the Grok PreToolUse language gate are outside that installer. Those three adapters are not installed yet:
 
 - Claude Code `.claude/rules/*.md` with `paths:` globs
 - Cursor `.mdc` with `globs`

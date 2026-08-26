@@ -76,6 +76,11 @@ def test_apply_then_check_clean(tmp_path: Path) -> None:
     skills = home / ".agents" / "skills"
     assert skills.is_symlink()
     assert (skills / "translate" / "SKILL.md").is_file()
+    criteria = home / ".agents" / "criteria"
+    assert criteria.is_symlink()
+    assert (criteria / "00-routing.md").is_file()
+    principles = home / ".agents" / "ENGINEERING_PRINCIPLES.md"
+    assert principles.is_symlink()
     assert not (home / ".claude" / "settings.json").exists()
 
 

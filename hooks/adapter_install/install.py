@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,6 +46,11 @@ SPECS: tuple[AdapterSpec, ...] = (
         mode=MODE_COPY,
     ),
     AdapterSpec(
+        source="hooks/adapters/claude/post-write-review.py",
+        dest=".claude/hooks/post-write-review.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
         source="hooks/adapters/skills",
         dest=".agents/skills",
         mode=MODE_SYMLINK,
@@ -79,6 +86,11 @@ SPECS: tuple[AdapterSpec, ...] = (
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
+        source="hooks/criteria/references/lang-yaml.md",
+        dest=".claude/lang_yaml.md",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
         source="hooks/criteria/references/lang-md.md",
         dest=".gemini/lang_md.md",
         mode=MODE_SYMLINK,
@@ -96,6 +108,11 @@ SPECS: tuple[AdapterSpec, ...] = (
     AdapterSpec(
         source="hooks/criteria/references/lang-ipynb.md",
         dest=".gemini/lang_ipynb.md",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="hooks/criteria/references/lang-yaml.md",
+        dest=".gemini/lang_yaml.md",
         mode=MODE_SYMLINK,
     ),
 )
@@ -312,7 +329,10 @@ def _can_apply(state: str) -> bool:
 
 
 def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
-    """Materialize one dest. Return applied, skipped, or abort token."""
+    """Materializes a single specification destination.
+
+    Returns the execution status token.
+    """
     source = resolve_source(grok_root, spec)
     dest = resolve_dest(home, spec)
     if not source.exists():
@@ -337,19 +357,33 @@ def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "regular-differs"
     if not _can_apply(state):
         return state
-    if dest.is_symlink():
-        dest.unlink()
-    elif dest.is_file():
-        dest.unlink()
-    elif dest.is_dir() and not dest.is_symlink():
-        _remove_replaceable_tree(dest)
     if spec.mode == MODE_SYMLINK:
+        if dest.is_dir() and not dest.is_symlink():
+            _remove_replaceable_tree(dest)
+        elif dest.exists() or dest.is_symlink():
+            dest.unlink()
         dest.symlink_to(
             source.resolve(),
             target_is_directory=source.is_dir(),
         )
         return "applied"
-    dest.write_bytes(source.read_bytes())
+
+    # os.replace() swaps a regular file or symlink atomically, avoiding the
+    # missing-destination window an unlink-then-write sequence would expose
+    # to a concurrent reader or filesystem watcher.
+    if dest.is_dir() and not dest.is_symlink():
+        _remove_replaceable_tree(dest)
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(source.read_bytes())
+        if source.stat().st_mode & 0o111:
+            tmp.chmod(tmp.stat().st_mode | 0o111)
+        os.replace(tmp, dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return "applied"
 
 

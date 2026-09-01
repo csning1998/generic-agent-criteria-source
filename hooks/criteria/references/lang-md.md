@@ -24,8 +24,12 @@
     - **(d) MD012/MD009**：
         - Consecutive blank lines in the full text have an upper bound of 1 line. Two or more consecutive blank lines are strictly prohibited
         - Meaningless trailing whitespace at line ends is absolutely prohibited
-    - **(e) MD001**：
+    - **(e) MD001 and Heading Sequence**：
         - Heading levels MUST increase in sequence. `####` is the only heading permitted under `###`. Skipping a level (e.g. `####` directly after `##`) is strictly prohibited. `#####` and deeper heading levels are prohibited. The deepest heading is H4, matching Notion Heading 4.
+        - H2 headings (`##`) MUST use consecutive Arabic numerals (e.g. `Section 1.`, `Section 2.`).
+        - H3 headings (`###`) MUST use an uppercase English letter paired with a type keyword. Technical documents and README-class files use `Task`, `Option`, or `Item` (e.g. `Task A.`, `Item A.`). Teaching and narrative files use `Step` (e.g. `Step A.`).
+        - H4 headings (`####`) MUST inherit the type keyword of the parent H3 and MUST append an Arabic numeral (e.g. `Task A.1`, `Item A.1`, `Step A.1`).
+    - **(f) Single H1 Limit**：Each Markdown file MAY contain only one H1 heading
 
 3. Code Blocks & Fences
     - **(a) Language Declaration**：Every fenced code block MUST declare a language (for example `bash`, `yaml`, `json`). An unnamed triple-backtick block is prohibited

@@ -8,12 +8,13 @@ Grok does not load this file at session start. Open it when a task hits more tha
 
 ### Item A. Mutate on disk
 
-| Path glob                                          | Scenario id | Inherits                                                                                                                                                                                                                     |
-| -------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `*.md` `*.mdx`                                     | markdown    | `lang-md.md`、`401-e-g_Style_and_Markings.md`、`202_Vocabulary_Prohibitions.md`                                                                                                                                              |
-| `*.ts` `*.tsx`                                     | typescript  | `lang-ts.md`、`401-a-c_General_Coding_Standards.md`、`401-d_Comment_Standards.md`、`401-e-g_Style_and_Markings.md`、`401-h_Code_Comment_Decisions_and_Lifecycle.md`、`401-j-k_Secure_File_Editing_and_Identifier_Naming.md`  |
-| `*.tf` `*.hcl` `*.tfvars` `*.tofu` `*.pkrvars.hcl` | hcl         | `lang-hcl.md`、`401-a-c_General_Coding_Standards.md`、`401-d_Comment_Standards.md`、`401-e-g_Style_and_Markings.md`、`401-h_Code_Comment_Decisions_and_Lifecycle.md`、`401-j-k_Secure_File_Editing_and_Identifier_Naming.md` |
-| `terraform/modules/**` `ansible/roles/utils_*`     | (IaC hook)  | `~/.grok/hooks/principles/` via ENGINEERING_PRINCIPLES                                                                                                                                                                       |
+| Path glob                                          | Scenario id | Inherits                                                                                                                                                                                                                      |
+| -------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `*.md` `*.mdx`                                     | markdown    | `lang-md.md`、`401-e-g_Style_and_Markings.md`、`202_Vocabulary_Prohibitions.md`                                                                                                                                               |
+| `*.ts` `*.tsx`                                     | typescript  | `lang-ts.md`、`401-a-c_General_Coding_Standards.md`、`401-d_Comment_Standards.md`、`401-e-g_Style_and_Markings.md`、`401-h_Code_Comment_Decisions_and_Lifecycle.md`、`401-j-k_Secure_File_Editing_and_Identifier_Naming.md`   |
+| `*.tf` `*.hcl` `*.tfvars` `*.tofu` `*.pkrvars.hcl` | hcl         | `lang-hcl.md`、`401-a-c_General_Coding_Standards.md`、`401-d_Comment_Standards.md`、`401-e-g_Style_and_Markings.md`、`401-h_Code_Comment_Decisions_and_Lifecycle.md`、`401-j-k_Secure_File_Editing_and_Identifier_Naming.md`  |
+| `*.yaml` `*.yml` `*.j2`                            | yaml        | `lang-yaml.md`、`401-a-c_General_Coding_Standards.md`、`401-d_Comment_Standards.md`、`401-e-g_Style_and_Markings.md`、`401-h_Code_Comment_Decisions_and_Lifecycle.md`、`401-j-k_Secure_File_Editing_and_Identifier_Naming.md` |
+| `terraform/modules/**` `ansible/roles/utils_*`     | (IaC hook)  | `~/.grok/hooks/principles/` via ENGINEERING_PRINCIPLES                                                                                                                                                                        |
 
 全文在 `references/` 與 IaC hook。情境檔用 `load:` 繼承，不抄父正文。
 
@@ -53,6 +54,8 @@ Resident distill, skill bodies, the Claude thin shell, and `~/.agents/criteria` 
 - Grok PreToolUse that denies a write until the matching spec was `read_file` this session
 
 Until those exist, the executing Agent still opens the matching scenario file in Section 1 and the files listed in its `load:`, and does not preload unrelated scenarios.
+
+Claude Code does have a PostToolUse self-review hook, distinct from the three gaps above: `hooks/adapters/claude/post-write-review.py`, materialized to `.claude/hooks/post-write-review.py` by the same installer. It fires after every `Edit`/`Write`. It matches the written path against Section 1 Item A's `path_glob` table. It surfaces the matched scenario's `load:` files as `additionalContext`. The `additionalContext` instructs the Agent to re-check the file just written against those `load:` files and to fix any violation directly instead of only acknowledging the violation. `gate-check.py` (PreToolUse) gates writing before the fact; this hook reviews after the fact. Since both hooks track "surfaced" state independently per session against the same `~/.agents/criteria` tree, a scenario already surfaced pre-write still gets surfaced again post-write.
 
 ## Section 4. Full criterion files
 

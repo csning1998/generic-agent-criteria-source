@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from adapter_install.install import MODE_COPY
 from adapter_install.install import SPECS
+from adapter_install.install import AdapterSpec
 from adapter_install.install import _remove_replaceable_tree
+from adapter_install.install import apply_spec
 from adapter_install.install import check_spec
 from adapter_install.install import infer_grok_root
 from adapter_install.install import main
@@ -158,3 +161,66 @@ def test_symlink_home_component_aborts(tmp_path: Path) -> None:
     assert run_apply(_repo_root(), home) == 1
     assert not (outside / "CLAUDE.md").exists()
     assert not (home / ".agents" / "AGENTS.md").exists()
+
+
+def test_apply_leaves_no_tmp_file_behind(tmp_path: Path) -> None:
+    """A successful copy-mode apply leaves no `.name.tmp*` sibling."""
+    home = tmp_path / "home"
+    home.mkdir()
+    assert run_apply(_repo_root(), home) == 0
+    hooks_dir = home / ".claude" / "hooks"
+    leaked = [p for p in hooks_dir.iterdir() if ".tmp" in p.name]
+    assert leaked == []
+
+
+def test_apply_spec_cleans_up_tmp_on_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for !16.
+
+    A failure between write and replace must not leak the
+    `.name.tmp*` scratch file at the destination.
+    """
+    grok_root = tmp_path / "grok"
+    grok_root.mkdir()
+    source = grok_root / "src.txt"
+    source.write_text("hello\n")
+    home = tmp_path / "home"
+    dest_dir = home / ".claude"
+    dest_dir.mkdir(parents=True)
+    spec = AdapterSpec(source="src.txt", dest=".claude/target", mode=MODE_COPY)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated os.replace failure")
+
+    monkeypatch.setattr("adapter_install.install.os.replace", _boom)
+    with pytest.raises(RuntimeError, match="simulated os.replace failure"):
+        apply_spec(grok_root, home, spec)
+    leaked = [p for p in dest_dir.iterdir() if ".tmp" in p.name]
+    assert leaked == []
+    assert not (dest_dir / "target").exists()
+
+
+def test_apply_spec_dir_dest_under_copy_mode_is_left_untouched(
+    tmp_path: Path,
+) -> None:
+    """A real directory at a copy-mode dest is reported unexpected-type.
+
+    The state machine gates apply_spec before its atomic-replace branch,
+    leaving no tree-removal path for a non-symlink directory dest.
+    """
+    grok_root = tmp_path / "grok"
+    grok_root.mkdir()
+    source = grok_root / "src.txt"
+    source.write_text("hello\n")
+    home = tmp_path / "home"
+    dest = home / ".claude" / "target"
+    dest.mkdir(parents=True)
+    (dest / "inner.txt").write_text("leftover\n")
+    spec = AdapterSpec(source="src.txt", dest=".claude/target", mode=MODE_COPY)
+
+    result = apply_spec(grok_root, home, spec)
+
+    assert result == "unexpected-type"
+    assert dest.is_dir()
+    assert (dest / "inner.txt").read_text() == "leftover\n"

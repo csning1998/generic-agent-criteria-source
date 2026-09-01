@@ -25,6 +25,12 @@ HARD_DENY_COMMAND_SUBSTRINGS = ("git push --force", "git push -f", "rm -rf")
 NOTEBOOK_GLOBS = ("*.ipynb",)
 EXEC_PHRASES = ("Approve", "Accept", "Agree", "Consent", "Permit", "Execute")
 
+# Rule 401(f): flags the standalone pronoun form following a comment
+# marker anywhere on the line, including a trailing comment after code,
+# excluding demonstrative-adjective uses that modify a following noun.
+BARE_IT_PATTERN = re.compile(r"(?:#|//).*\bit\b", re.IGNORECASE)
+COMMENT_CHECK_SKIP_GLOBS = ("*.md", "*.mdx")
+
 
 ARRAY_KEYS = (
     "path_glob",
@@ -239,15 +245,54 @@ def gate_once(session_id: str, meta: dict) -> None:
     )
 
 
+def find_bare_it_violation(text: str) -> str | None:
+    """Return the first comment line containing a bare pronoun 'it', if any."""
+    for line in text.splitlines():
+        if BARE_IT_PATTERN.search(line):
+            return line.strip()
+    return None
+
+
+def resulting_text(tool_input: dict, file_path: str) -> str:
+    """Return the post-write text an Edit or Write call would produce.
+
+    An Edit call's `new_string` alone omits unchanged surrounding text,
+    which would miss a violation spanning the old/new boundary; this
+    merges `new_string` into the on-disk file the same way Edit applies it.
+    """
+    if "new_string" not in tool_input:
+        return tool_input.get("content", "")
+    old_string = tool_input.get("old_string", "")
+    new_string = tool_input.get("new_string", "")
+    try:
+        current = Path(file_path).read_text(encoding="utf-8")
+    except OSError:
+        return new_string
+    if tool_input.get("replace_all"):
+        return current.replace(old_string, new_string)
+    return current.replace(old_string, new_string, 1)
+
+
 def handle_edit_write(payload: dict, scenarios: list[dict]) -> None:
     """Gate an Edit/Write tool call against path_glob-routed scenarios."""
     session_id = payload.get("session_id", "unknown")
-    file_path = payload.get("tool_input", {}).get("file_path", "")
+    tool_input = payload.get("tool_input", {})
+    file_path = tool_input.get("file_path", "")
     if any(fnmatch.fnmatch(Path(file_path).name, g) for g in NOTEBOOK_GLOBS):
         deny(
             "notebook.md: disk mutation of .ipynb is prohibited in every case; "
             "use Literature Programming in-session instead."
         )
+    skip = COMMENT_CHECK_SKIP_GLOBS
+    if not any(fnmatch.fnmatch(Path(file_path).name, g) for g in skip):
+        write_text = resulting_text(tool_input, file_path)
+        violation = find_bare_it_violation(write_text)
+        if violation:
+            deny(
+                "401-f register: a comment line uses the bare pronoun "
+                "'it' with no noun a cold reader can point to. Name "
+                f"the concrete noun instead. Flagged line: {violation!r}"
+            )
     meta = match_path(scenarios, file_path)
     if meta is None:
         meta = next(
@@ -287,10 +332,9 @@ def handle_bash(payload: dict, scenarios: list[dict]) -> None:
     if ext_write is not None and any(
         prefix in command for prefix in ext_write.get("command_prefix", [])
     ):
-        # Allowlist model: a git/glab/gh invocation is authorized only when it
-        # matches a known read-only pattern. Anything unmatched, including a
-        # write subcommand this list has not enumerated yet, requires the
-        # execution phrase. command_glob only supplies a precise reason string.
+        # Allowlist model: a git/glab/gh invocation is authorized only against
+        # a known read-only pattern; an unmatched command, including an
+        # unenumerated write subcommand, requires the execution phrase.
         if any(
             p in command for p in ext_write.get("readonly_command_glob", [])
         ) and not any(p in command for p in ext_write.get("command_glob", [])):

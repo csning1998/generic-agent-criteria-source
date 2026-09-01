@@ -1,6 +1,6 @@
 # Notion MCP
 
-Before the first Notion call in a session, call `search_tool` so live schemas load. A sufficient query is `notion fetch query data sources search`.
+Before the first Notion call in a session, call `search_tool` so live schemas load. A sufficient query is `notion create-pages query-data-sources update-page`. The query MUST NOT contain the isolated token `search`.
 
 Call tools through `use_tool` with Grok names `notion__notion-*`.
 

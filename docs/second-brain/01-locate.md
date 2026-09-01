@@ -4,7 +4,7 @@ Prefer a stored URL or `collection://` ID from `03-identifiers.md`. Call `notion
 
 ## Tool sequence
 
-1. Call `search_tool` once in a session with query `notion fetch query data sources`.
+1. Call `search_tool` once in a session with query `notion create-pages query-data-sources update-page`. The query MUST NOT contain the isolated token `search`.
 2. Call `notion__notion-fetch` with a page URL, a raw UUID, or a `collection://` ID.
 3. Call `notion__notion-query-data-sources` with `data.data_source_urls` and a SQL `query`.
 

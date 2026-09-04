@@ -91,6 +91,11 @@ SPECS: tuple[AdapterSpec, ...] = (
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
+        source="hooks/criteria/references/lang-go.md",
+        dest=".claude/lang_go.md",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
         source="hooks/criteria/references/lang-md.md",
         dest=".gemini/lang_md.md",
         mode=MODE_SYMLINK,
@@ -113,6 +118,11 @@ SPECS: tuple[AdapterSpec, ...] = (
     AdapterSpec(
         source="hooks/criteria/references/lang-yaml.md",
         dest=".gemini/lang_yaml.md",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="hooks/criteria/references/lang-go.md",
+        dest=".gemini/lang_go.md",
         mode=MODE_SYMLINK,
     ),
 )

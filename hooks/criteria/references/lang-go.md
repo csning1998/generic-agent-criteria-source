@@ -1,0 +1,36 @@
+# **Go (`*.go`) Specific Standards**
+
+- **(a) Applicable Scope**：Includes `*.go`, both production and `_test.go` files
+- **(b) Formatting and Static Checks**：
+    - `gofmt` MUST leave zero diff before a file is considered finished. `goimports` grouping (standard library, then third-party, then the module's own packages, each group separated by one blank line) MUST be followed
+    - `go vet` MUST report zero findings. `golangci-lint` (or the project's configured linter) findings MUST be resolved, not suppressed with `//nolint` unless a one-line WHY comment justifies the specific exception
+- **(c) Naming**：
+    - `MixedCaps` MUST be used in every case. `under_scores` are prohibited except inside `_test.go` filenames and build-tag-style suffixes (`_linux.go`)
+    - Exported identifiers MUST use `PascalCase`. Unexported identifiers MUST use `camelCase`. An initialism (`ID`, `URL`, `HTTP`, `API`) MUST keep uniform case in every case (`userID`, not `userId`)
+    - Language-agnostic verb-initial naming (§401(k)) applies. A boolean-returning function MUST carry a predicate prefix (`is`, `has`, `can`) or an equivalent self-evident predicate word (`Exists`, `Contains`). A bare noun or bare past-participle name for a boolean function is prohibited
+    - A single-letter receiver name tied to the type's first letter (`func (p *Printer) ...`) is the default. A receiver name MUST stay identical across every method of the same type
+    - A package name MUST be a short, lowercase, single word with no underscore. A package name MUST NOT stutter with an exported symbol inside it, for example `config.Load`, not `config.ConfigLoad`
+- **(d) Error Handling**：
+    - An error MUST be checked at the call site that produces it. A discarded error via a bare `_` assignment MUST carry a one-line WHY comment explaining why the failure is safe to ignore
+    - Error wrapping MUST use `fmt.Errorf` with the `%w` verb, never `%v` or string concatenation, when the caller may need `errors.Is`/`errors.As` on the result
+    - An error string MUST NOT be capitalized and MUST NOT end with punctuation, matching the standard library convention
+    - A package-level sentinel error MUST be declared with `errors.New` and named with an `Err` prefix (`ErrNotFound`). A custom error type MUST implement `error` on a pointer or value receiver consistently with how the type is otherwise used
+- **(e) Concurrency**：
+    - A goroutine launched without a bounded lifetime or a way for the caller to observe completion is prohibited. `sync.WaitGroup`, a done channel, or `errgroup.Group` MUST be used to make completion observable
+    - A `context.Context` MUST be the first parameter of a function that performs I/O, a blocking wait, or spawns a goroutine, named `ctx` in every case, and MUST NOT be stored inside a struct field
+    - Shared mutable state accessed from more than one goroutine MUST be protected by a `sync.Mutex`, a `sync.RWMutex`, or a channel. Running with `-race` MUST be part of the verification step before a change is considered complete
+- **(f) API and Type Design**：
+    - A bare `interface{}` (or `any`) parameter or return value is prohibited unless the function is a generic container, a reflection-based utility, or an explicit adapter to a third-party API that itself demands it
+    - An exported function MUST NOT return an unexported type. An exported struct field MUST have a doc comment when its zero value or valid range is not self-evident from its name and type
+    - A constructor MUST be named `New` (package-level, single primary type) or `NewX` (multiple constructible types in one package), and MUST return a pointer unless the type is designed for value semantics throughout
+    - Struct embedding MUST be used only to state a genuine is-a or delegation relationship. Embedding solely to shorten field access chains is prohibited
+- **(g) Testing**：
+    - A test file MUST use table-driven cases with `t.Run` subtests once more than two cases exercise the same function, matching this project's own established style
+    - `t.Helper()` MUST be called at the top of any test helper function that itself calls `t.Fatalf`/`t.Errorf`. This attributes a reported failure's line number to the caller instead of the helper itself
+    - `t.TempDir()` MUST be used for filesystem fixtures in every case. A hardcoded `/tmp` path is prohibited
+    - A test MUST assert the exact expected value or an exact substring/format match where feasible, not merely that an error is non-nil, when the code path under test has more than one distinct failure mode
+- **(h) Package Structure**：
+    - `internal/` MUST be used for any package not intended for import outside the module. A dependency cycle between packages is prohibited. A shared type MUST be extracted to a lower-level package instead
+    - A file MUST stay close to 300 to 390 lines. A file that grows past that range for one cohesive responsibility SHOULD be split into multiple files within the same package by responsibility, not by arbitrary line count
+- **(i) Documentation Comments**：
+    - An exported identifier's doc comment MUST begin with the identifier's own name as the first word, matching `go doc` and `golint` conventions. Comment content and length otherwise follow `401-d_Comment_Standards.md` and `401-h_Code_Comment_Decisions_and_Lifecycle.md`

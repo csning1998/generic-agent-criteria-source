@@ -10,7 +10,7 @@ Sections 1, 5, and 8 of `ENGINEERING_PRINCIPLES.md` are prerequisites for this f
 
 The choice between sidecar and ambient MUST be written in `planning/decisions.md`, and that entry MUST record the trade-off. Istio ambient mode is GA from 1.24. ztunnel handles L4 on the node (mTLS, L4 authorization, telemetry). A waypoint handles L7 at the namespace or the service. Ambient admission is a namespace label and does not restart a Pod. Sidecar admission restarts a Pod.
 
-Official source URL is https://istio.io/latest/docs/overview/dataplane-modes/
+Official source URL is <https://istio.io/latest/docs/overview/dataplane-modes/>
 
 One cluster MAY run both modes. The mix boundary MUST be recorded. The mix MUST NOT spread without a record.
 

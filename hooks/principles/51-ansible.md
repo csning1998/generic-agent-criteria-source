@@ -8,7 +8,7 @@ Sections 1 through 9 of `ENGINEERING_PRINCIPLES.md` apply to this file. The base
 
 ansible-core 2.19 introduced Data Tagging and a rewritten templating engine. That change is breaking. A non-string conditional, a value passed through a Jinja macro, a `default()` after `deepcopy`, and a loop input that is not a list raise an error after 2.19. Those inputs used to pass silently.
 
-Official source URL is https://docs.ansible.com/projects/ansible-core/devel/porting_guides/porting_guide_core_2.19.html
+Official source URL is <https://docs.ansible.com/projects/ansible-core/devel/porting_guides/porting_guide_core_2.19.html>
 
 ansible-core 2.20 (Ansible 13) deprecated `INJECT_FACTS_AS_VARS`. The controller requires Python 3.12 or newer.
 

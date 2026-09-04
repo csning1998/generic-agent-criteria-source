@@ -1,10 +1,10 @@
 # **§ 401(d). Comment Standards**
 
 - **(d) Comment Standards**：
-    - `# texts` MUST be used in every case. Isolation lines such as `# ====` or `# ----` are strictly prohibited. Punctuation and symbol limits follow `(g)`
-    - Minimal-amplitude comments MUST be observed. Comments are responsible only for pointing out non-obvious architectural reasons, boundaries, limits, or trade-offs. Content rules follow `(h)`. Restating WHAT the source or `git diff` already shows is prohibited. Synonymous repetition and causal redundancy are strictly prohibited
-    - Anthropomorphic, subjectively emotional, or non-engineering-quantified adjectives applied to system behavior are strictly prohibited. Function and state wording MUST be an objective description of system behavior. That diction rule MUST NOT become a restatement of WHAT the code does
-    - Community slang, colloquial abbreviations, and vague reference are fully prohibited. All architectural descriptions and operational acts MUST stay in strong alignment with the official-documentation terminology of that technology stack
-    - Restating a necessary result inside a single comment by utilizing "so" in an overly colloquial way is prohibited
-    - English syntactic structure, preposition placement, and word-frequency limits follow `(e)` and `(f)` in every case
-    - If an out-of-scope and necessary correction arises because of a code change, it MAY be stated only in the conversation session. Writing it into a codebase comment is prohibited
+    - Standard `# text` syntax MUST be used for all code comments. Writing isolation lines in code comments (for example, `# ====` or `# ----`) MUST NOT occur. Punctuation and symbol limits for code comments MUST follow §401(g).
+    - Code comments MUST maintain minimal amplitude. A code comment MUST serve only to point out non-obvious architectural reasons, system boundaries, operational limits, or design trade-offs. Content rules for code comments MUST follow §401(h). A code comment MUST NOT restate WHAT the source code or `git diff` already shows. Synonymous repetition and causal redundancy in code comments MUST NOT occur.
+    - Using anthropomorphic, subjectively emotional, or non-engineering-quantified adjectives to describe system behavior MUST NOT occur. Function and state wording MUST be an objective description of system behavior. The objective diction requirement MUST NOT result in a restatement of WHAT the source code executes.
+    - Community slang, colloquial abbreviations, and vague references MUST NOT be used in code comments. All architectural descriptions and operational acts MUST align strictly with the official documentation terminology of the target technology stack.
+    - Restating a necessary result inside a single code comment by utilizing "so" in a colloquial manner MUST NOT occur.
+    - English syntactic structure, preposition placement, and word-frequency limits in code comments MUST follow §401(e) and §401(f) in every case.
+    - If an out-of-scope and necessary correction arises due to a code change, the correction MAY be stated only in the conversation session. Writing an out-of-scope correction into a codebase comment MUST NOT occur.

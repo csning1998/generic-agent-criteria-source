@@ -1,16 +1,19 @@
 # **§ 404. L2 Constraint**
 
-This clause states when an L2 language spec applies. The load path follows `00-routing.md` Section 1. L2 text lives in the linked files in this directory.
+§ 404 states when an L2 language specification applies. The load path MUST follow `00-routing.md` Section 1. The L2 text resides in the linked files in the current directory.
 
 1. HashiCorp Configuration Language
-    - **(a) Applicable Scope**：When files such as `*.hcl`, `*.pkrvars.hcl`, `*.tf`, `*.tfvars`, or `*.tofu` are accessed or retrieved
-    - **(b) L2 Text**：[`lang-hcl.md`](./lang-hcl.md)
+    - **(a) Applicable Scope**：The HashiCorp Configuration Language L2 specification applies when files such as `*.hcl`, `*.pkrvars.hcl`, `*.tf`, `*.tfvars`, or `*.tofu` are accessed or retrieved.
+    - **(b) L2 Text**：The L2 text resides in [`lang-hcl.md`](./lang-hcl.md).
 2. Jupyter Notebook
-    - **(a) Applicable Scope**：When files such as `*.ipynb` are accessed or retrieved
-    - **(b) L2 Text**：[`lang-ipynb.md`](./lang-ipynb.md)
+    - **(a) Applicable Scope**：The Jupyter Notebook L2 specification applies when files such as `*.ipynb` are accessed or retrieved.
+    - **(b) L2 Text**：The L2 text resides in [`lang-ipynb.md`](./lang-ipynb.md).
 3. TypeScript
-    - **(a) Applicable Scope**：When files such as `*.ts` or `*.tsx` are accessed or retrieved
-    - **(b) L2 Text**：[`lang-ts.md`](./lang-ts.md)
+    - **(a) Applicable Scope**：The TypeScript L2 specification applies when files such as `*.ts` or `*.tsx` are accessed or retrieved.
+    - **(b) L2 Text**：The L2 text resides in [`lang-ts.md`](./lang-ts.md).
 4. Markdown and Prose
-    - **(a) Applicable Scope**：When `*.md`, `*.mdx`, or prose files that contain a large volume of written exposition are accessed, retrieved, or generated
-    - **(b) L2 Text**：[`lang-md.md`](./lang-md.md)
+    - **(a) Applicable Scope**：The Markdown and Prose L2 specification applies when `*.md`, `*.mdx`, or prose files that contain a large volume of written exposition are accessed, retrieved, or generated.
+    - **(b) L2 Text**：The L2 text resides in [`lang-md.md`](./lang-md.md).
+5. Golang
+    - **(a) Applicable Scope**：The Golang L2 specification applies when files such as `*.go`, including `_test.go`, are accessed or retrieved.
+    - **(b) L2 Text**：The L2 text resides in [`lang-go.md`](./lang-go.md).

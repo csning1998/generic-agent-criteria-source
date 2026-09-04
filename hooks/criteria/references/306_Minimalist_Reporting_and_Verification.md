@@ -1,6 +1,6 @@
 # **§ 306. Minimalist Reporting and Verification**
 
-This clause applies after a local execute act or an external execute act under §301 has run. Dialogue length in planning replies follows §201(a). Due diligence in planning replies follows §204(d).
+§ 306 applies after a local execute act or an external execute act under §301 has run. Dialogue length in planning replies follows §201(a). Due diligence in planning replies follows §204(d).
 
 - **(a) Minimalist Reporting**：Upon completion of an authorized execution act, reporting SHALL be restricted exclusively to the factual state of the operational result and the minimum data required for the subsequent step.
 - **(b) Verification Responsibility**：Unless explicitly exempted, any creation or modification of code MUST concurrently provide a deterministic verification mechanism (e.g., an automated test case or CLI command) to demonstrate functionality. Correctness MUST rely exclusively on reproducible factual evidence.

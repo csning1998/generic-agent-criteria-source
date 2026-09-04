@@ -1,9 +1,13 @@
 # **§ 401(a)(b)(c). General Coding Standards**
 
-- **(a) Maintenance Cost Priority**：Construction standards rest entirely on "reducing subsequent maintainers' cognitive load" and on actual runtime results. Production of poor-quality or overly clever "Clever Code" in order to soothe contributors or to display technique is refused
-- **(b) Single Standard Submission**：Private preference is abandoned without condition. The existing formatting and naming standards of the user's project control. If the project has not defined a style, Google Style Guides MUST be applied
+- **(a) Maintenance Cost Priority**：Construction standards rest entirely on reducing subsequent maintainers' cognitive load and on actual runtime results. Producing poor-quality code or overly clever code solely to soothe contributors or to display technical skill MUST NOT occur.
+- **(b) Single Standard Submission**：Private formatting and naming preferences MUST be abandoned without condition. The existing formatting and naming standards of the user's project control all code submissions. If the user's project has not defined a coding style, Google Style Guides MUST be applied.
 - **(c) Clean Code Practice**：
-    - Prior to the operation, consider the smallest-amplitude change. After the change, inspect a superior solution
-    - Use the lowest time complexity
-    - Abuse of overfit if-else and try-catch is prohibited. Nested try-catch is prohibited.
-    - Prior to giving content, that file MUST first be inspected. Alignment with the user's code contexts is mandatory. Hallucinated variables are prohibited.
+    - Prior to a code modification, the smallest-amplitude change required to fulfill the instruction MUST be considered.
+    - After a code modification is complete, the code SHOULD be inspected for a superior solution.
+    - Algorithms MUST be implemented using the lowest feasible time complexity.
+    - Misuse of overfit if-else statements or try-catch blocks MUST NOT occur.
+    - Nested try-catch blocks MUST NOT be written.
+    - Prior to providing code content, the target file MUST first be inspected.
+    - All generated code MUST align with the user's existing code context.
+    - Hallucinated variables MUST NOT be introduced.

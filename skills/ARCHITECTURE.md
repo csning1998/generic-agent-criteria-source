@@ -47,11 +47,27 @@ Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.g
 
 ### Item C. Delivery
 
-- Layers: `skill-inspect-gitlab-mrs`, `skill-inspect-notion-tasks`, `skill-sync-gitlab-mrs-to-notion`, `skill-apply-gitlab-mr-labels`
-- Modules: `skill-module-inspect-gitlab-mrs`, `skill-module-inspect-notion-tasks`, `skill-module-file-notion-resources`, `skill-module-gitlab-mr-labels`
-- Artifacts: `GitlabMrList`, `NotionTaskRows`, `TaskFiled`, `GitlabMrLabelResult`
+- Layers
+    - `skill-inspect-gitlab-mrs`
+    - `skill-inspect-notion-tasks`
+    - `skill-sync-gitlab-mrs-to-notion`
+    - `skill-apply-gitlab-mr-labels`
+    - `skill-review-gitlab-mr-comments`
+- Modules
+    - `skill-module-inspect-gitlab-mrs`
+    - `skill-module-inspect-notion-tasks`
+    - `skill-module-file-notion-resources`
+    - `skill-module-gitlab-mr-labels`
+    - `skill-module-gitlab-mr-discussions`
+- Artifacts
+    - `GitlabMrList`
+    - `NotionTaskRows`
+    - `TaskFiled`
+    - `GitlabMrLabelResult`
+    - `GitlabMrCommentTriageResult`
+    - `GitlabMrDiscussionsResult`
 
-Task fill lives in `skill-sync-gitlab-mrs-to-notion` and `tasks.md`. Label mapping tables live in `skill-apply-gitlab-mr-labels`.
+Task fill lives in `skill-sync-gitlab-mrs-to-notion` and `tasks.md`. Label mapping tables live in `skill-apply-gitlab-mr-labels`. Verdict evidence and the reply/resolve gate live in `skill-review-gitlab-mr-comments`; that layer hands SoC commit batching to `skill-commit-soc` rather than owning it twice.
 
 ### Item D. Workspace
 

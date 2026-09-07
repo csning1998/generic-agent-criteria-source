@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,62 @@ def test_divergent_regular_file_aborts(tmp_path: Path) -> None:
     assert run_apply(_repo_root(), home) == 1
     assert dest.read_text(encoding="utf-8") == "owner edit\n"
     assert not dest.is_symlink()
+
+
+def test_apply_spec_file_divergent_aborts(tmp_path: Path) -> None:
+    """`apply_spec` itself must refuse a divergent file dest.
+
+    `run_apply` pre-screens every spec with `check_spec` and aborts the
+    whole run before calling `apply_spec` at all, so
+    `test_divergent_regular_file_aborts` never exercises `apply_spec`'s
+    own `regular-differs` handling. This test calls `apply_spec`
+    directly to close that blind spot for the file case, mirroring
+    `test_divergent_directory_dest_aborts` for the directory case.
+    """
+    home = tmp_path / "home"
+    spec = next(s for s in SPECS if s.dest == ".agents/AGENTS.md")
+    dest = resolve_dest(home, spec)
+    dest.parent.mkdir(parents=True)
+    dest.write_text("owner edit\n", encoding="utf-8")
+    assert check_spec(_repo_root(), home, spec) == "regular-differs"
+    assert apply_spec(_repo_root(), home, spec) == "regular-differs"
+    assert dest.read_text(encoding="utf-8") == "owner edit\n"
+    assert not dest.is_symlink()
+
+
+def test_divergent_directory_dest_aborts(tmp_path: Path) -> None:
+    """Apply must not delete a directory dest whose contents differ.
+
+    Regression guard for the `.grok/skills` symlink spec: a stray
+    untracked file under a real directory dest (for example a leftover
+    `__pycache__`) must abort that spec instead of silently deleting
+    the owner's directory.
+    """
+    home = tmp_path / "home"
+    spec = next(s for s in SPECS if s.dest == ".grok/skills")
+    dest = resolve_dest(home, spec)
+    dest.mkdir(parents=True)
+    marker = dest / "owner-file.txt"
+    marker.write_text("owner edit\n", encoding="utf-8")
+    assert check_spec(_repo_root(), home, spec) == "regular-differs"
+    assert apply_spec(_repo_root(), home, spec) == "regular-differs"
+    assert dest.is_dir()
+    assert not dest.is_symlink()
+    assert marker.read_text(encoding="utf-8") == "owner edit\n"
+
+
+def test_identical_directory_becomes_symlink(tmp_path: Path) -> None:
+    """A same-bytes directory dest is replaced by a symlink."""
+    home = tmp_path / "home"
+    spec = next(s for s in SPECS if s.dest == ".grok/skills")
+    dest = resolve_dest(home, spec)
+    source = resolve_source(_repo_root(), spec)
+    dest.parent.mkdir(parents=True)
+    shutil.copytree(source, dest)
+    assert check_spec(_repo_root(), home, spec) == "regular-same"
+    assert apply_spec(_repo_root(), home, spec) == "applied"
+    assert dest.is_symlink()
+    assert dest.resolve() == source.resolve()
 
 
 def test_default_command_is_check(tmp_path: Path) -> None:

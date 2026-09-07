@@ -11,8 +11,8 @@ from pathlib import Path
 
 MODE_SYMLINK = "symlink"
 MODE_COPY = "copy"
-_ALLOWED_PREFIXES = (".agents/", ".claude/", ".gemini/")
-_PROTECTED_REL = (".claude", ".agents", ".gemini")
+_ALLOWED_PREFIXES = (".agents/", ".claude/", ".gemini/", ".grok/")
+_PROTECTED_REL = (".claude", ".agents", ".gemini", ".grok")
 
 
 @dataclass(frozen=True)
@@ -123,6 +123,26 @@ SPECS: tuple[AdapterSpec, ...] = (
     AdapterSpec(
         source="hooks/criteria/references/lang-go.md",
         dest=".gemini/lang_go.md",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="rules",
+        dest=".grok/rules",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="skills",
+        dest=".grok/skills",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="hooks",
+        dest=".grok/hooks",
+        mode=MODE_SYMLINK,
+    ),
+    AdapterSpec(
+        source="roles",
+        dest=".grok/roles",
         mode=MODE_SYMLINK,
     ),
 )

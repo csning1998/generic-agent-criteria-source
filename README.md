@@ -1,6 +1,6 @@
 # README for The Repository
 
-This repository's working tree maps directly to `~/.grok`. Grok installation populates `~/.grok` with runtime files, causing `git clone` against this non-empty directory to fail. The setup attaches a Git remote to the existing `~/.grok` directory and checks out `main`.
+This repository's working tree maps directly to `~/.grok`. Grok installation populates `~/.grok` with runtime files. Consequently `git clone` against this non-empty directory fails. The setup attaches a Git remote to the existing `~/.grok` directory and checks out `main`.
 
 ## Section 1. Clone Repository into Existing Grok Home
 
@@ -13,7 +13,7 @@ This repository's working tree maps directly to `~/.grok`. Grok installation pop
 
 ### Task B. Tracked and Untracked Path Behavior
 
-`.gitignore` enforces an allow-list model. Checkout operations mutate only tracked repository paths.
+`.gitignore` enforces an allow list model. Checkout operations mutate only tracked repository paths.
 
 - **Paths Overwritten or Created During Checkout:**
     - `skills/`
@@ -41,7 +41,7 @@ This repository's working tree maps directly to `~/.grok`. Grok installation pop
     - `memtrace/`
     - `.lock` files, temporary caches, and `worktrees.db`
 
-`git checkout -f` overwrites tracked local modifications. Untracked files that block working tree checkout remain.
+`git checkout -f` overwrites tracked local modifications. Untracked files which block working tree checkout remain.
 
 ### Task C. Execution Steps
 
@@ -67,7 +67,7 @@ This repository's working tree maps directly to `~/.grok`. Grok installation pop
 
 3. **Resolve `config.toml` Conflict**
 
-    Existing installations contain an untracked `config.toml` that conflicts with the tracked repository file, causing `git checkout` to fail with `untracked working tree files would be overwritten`. Relocate local configuration to permit repository checkout:
+    Existing installations contain an untracked `config.toml` which conflicts with the tracked repository file. The conflict causes `git checkout` to fail with `untracked working tree files would be overwritten`. Relocate local configuration to permit repository checkout:
 
     ```bash
     mv config.toml config.toml.local
@@ -108,13 +108,13 @@ export TF_HTTP_PASSWORD=$(VAULT_ADDR='https://127.0.0.1:8200' VAULT_CACERT="$HOM
 
 ## Section 3. Harness Adapter Installer
 
-`~/.claude`, `~/.agents`, and `~/.gemini` are product homes. Those directories MUST NOT enter this repository. Distill, cross-harness skill bodies, and the Claude thin shell have their source of truth in this tree. `hooks/bin/install-adapters.py` materializes the runtime copies.
+`~/.claude`, `~/.agents`, and `~/.gemini` are product homes. Product homes MUST NOT enter this repository. Distill, skill bodies shared across harnesses, and the Claude thin shell have their source of truth in this tree. `hooks/bin/install-adapters.py` materializes the runtime copies.
 
 The installer is written in Python. It MUST NOT call `cp`, `ln`, `rsync`, or `subprocess`. The default verb is `check`. The `apply` verb writes destinations and constitutes a local execute act under §301.
 
 ### Item A. Source of truth
 
-Grok reads `rules/AGENT_CRITERIA.md` directly. That path is not an installer destination.
+Grok reads `rules/AGENT_CRITERIA.md` directly. The distill path is not an installer destination.
 
 Tracked sources the installer reads:
 
@@ -123,7 +123,7 @@ Tracked sources the installer reads:
 - Skill bodies: `hooks/adapters/skills/`
 - Language L2: `hooks/criteria/references/lang-*.md`
 
-`config.example.toml` keeps `[skills] paths = ["~/.agents/skills"]`. After `apply`, that path is a symlink to `hooks/adapters/skills`.
+`config.example.toml` keeps `[skills] paths = ["~/.agents/skills"]`. After `apply`, the skills path is a symlink to `hooks/adapters/skills`.
 
 ### Item B. Commands
 
@@ -149,26 +149,31 @@ Run from `${HOME}/.grok`:
     uv run pytest tests/test_install_adapters.py
     ```
 
-### Item C. Allow-listed destinations
+### Item C. Destinations on the allow list
 
-| Source                                    | Dest                                  | Mode    |
-| ----------------------------------------- | ------------------------------------- | ------- |
-| `rules/AGENT_CRITERIA.md`                 | `~/.agents/AGENTS.md`                 | symlink |
-| `rules/AGENT_CRITERIA.md`                 | `~/.gemini/GEMINI.md`                 | symlink |
-| `hooks/adapters/claude/CLAUDE.md`         | `~/.claude/CLAUDE.md`                 | copy    |
-| `hooks/adapters/skills`                   | `~/.agents/skills`                    | symlink |
-| `hooks/criteria`                          | `~/.agents/criteria`                  | symlink |
-| `rules/ENGINEERING_PRINCIPLES.md`         | `~/.agents/ENGINEERING_PRINCIPLES.md` | symlink |
-| `hooks/criteria/references/lang-md.md`    | `~/.claude/lang_md.md`                | symlink |
-| `hooks/criteria/references/lang-hcl.md`   | `~/.claude/lang_hcl.md`               | symlink |
-| `hooks/criteria/references/lang-ts.md`    | `~/.claude/lang_ts.md`                | symlink |
-| `hooks/criteria/references/lang-ipynb.md` | `~/.claude/lang_ipynb.md`             | symlink |
-| `hooks/criteria/references/lang-md.md`    | `~/.gemini/lang_md.md`                | symlink |
-| `hooks/criteria/references/lang-hcl.md`   | `~/.gemini/lang_hcl.md`               | symlink |
-| `hooks/criteria/references/lang-ts.md`    | `~/.gemini/lang_ts.md`                | symlink |
-| `hooks/criteria/references/lang-ipynb.md` | `~/.gemini/lang_ipynb.md`             | symlink |
+| Source                                     | Dest                                  | Mode       |
+| ------------------------------------------ | ------------------------------------- | ---------- |
+| `rules/AGENT_CRITERIA.md`                  | `~/.agents/AGENTS.md`                 | symlink    |
+| `rules/AGENT_CRITERIA.md`                  | `~/.gemini/GEMINI.md`                 | symlink    |
+| `hooks/adapters/claude/CLAUDE.md`          | `~/.claude/CLAUDE.md`                 | copy       |
+| `hooks/adapters/skills`                    | `~/.agents/skills`                    | symlink    |
+| `hooks/criteria`                           | `~/.agents/criteria`                  | symlink    |
+| `rules/ENGINEERING_PRINCIPLES.md`          | `~/.agents/ENGINEERING_PRINCIPLES.md` | symlink    |
+| `hooks/criteria/references/lang-md.md`     | `~/.claude/lang_md.md`                | symlink    |
+| `hooks/criteria/references/lang-hcl.md`    | `~/.claude/lang_hcl.md`               | symlink    |
+| `hooks/criteria/references/lang-ts.md`     | `~/.claude/lang_ts.md`                | symlink    |
+| `hooks/criteria/references/lang-ipynb.md`  | `~/.claude/lang_ipynb.md`             | symlink    |
+| `hooks/criteria/references/lang-md.md`     | `~/.gemini/lang_md.md`                | symlink    |
+| `hooks/criteria/references/lang-hcl.md`    | `~/.gemini/lang_hcl.md`               | symlink    |
+| `hooks/criteria/references/lang-ts.md`     | `~/.gemini/lang_ts.md`                | symlink    |
+| `hooks/criteria/references/lang-ipynb.md`  | `~/.gemini/lang_ipynb.md`             | symlink    |
+| `hooks/criteria/<id>.md` `adapters.cursor` | `~/.cursor/rules/lang-<id>.mdc`       | cursor-mdc |
+| `hooks/adapters/claude/gate-check.py`      | `~/.cursor/hooks/gate-check.py`       | copy       |
+| `hooks/adapters/cursor/hooks.json`         | `~/.cursor/hooks.json`                | copy       |
 
-The Claude destination is copy mode because that file MUST keep `@~/.agents/AGENTS.md` plus §403 and §205(f). Destinations outside this table MUST be rejected. The installer MUST NOT write `settings.json`, `settings.local.json`, `oauth_creds.json`, `auth.json`, `control.key`, `daemon/`, `sessions/`, or `file-history/`. It MUST NOT replace `~/.claude`, `~/.agents`, or `~/.gemini` as a whole.
+Cursor destinations are derived from each scenario file which declares `adapters.cursor`. The installer renders a thin `.mdc` whose `globs` match the `adapters.cursor` field. The `.mdc` body cites each `load:` path under `~/.agents/criteria/`. L2 files remain in `hooks/criteria/references/`. Distill is not written under `~/.cursor/`. The installer copies Claude `gate-check.py`. The installer copies a Cursor `hooks.json`. PreToolUse can then deny the first matching write in a session.
+
+The Claude destination is copy mode because the Claude destination file MUST keep `@~/.agents/AGENTS.md` plus §403 and §205(f). Destinations outside this table MUST be rejected. The installer MUST NOT write `settings.json`, `settings.local.json`, `oauth_creds.json`, `auth.json`, `control.key`, `daemon/`, `sessions/`, or `file-history/`. The installer MUST NOT replace `~/.claude`, `~/.agents`, `~/.gemini`, `~/.grok`, or `~/.cursor` as a whole.
 
 ### Item D. Drift tokens and abort
 
@@ -176,18 +181,17 @@ The Claude destination is copy mode because that file MUST keep `@~/.agents/AGEN
 
 - `missing`: dest is absent
 - `regular-same`: dest is a regular file or directory whose bytes match the source. `apply` replaces it with a symlink
-- `regular-differs`: dest bytes do not match the source. `apply` prints `ABORT` for that run and writes no destination
+- `regular-differs`: dest bytes do not match the source. `apply` prints `ABORT` for the `apply` run and writes no destination
 - `wrong-symlink` / `broken-symlink`: dest is a symlink whose target is not the source. `apply` recreates the symlink
-- `copy-differs`: Claude thin shell bytes differ. `apply` overwrites from the tracked source
+- `copy-differs`: Claude thin shell or Cursor `.mdc` bytes differ. `apply` overwrites from the tracked or rendered source
 
-A destination whose relative path contains `..`, or that would escape `--home`, MUST be rejected before any write.
+A destination whose relative path contains `..`, or which would escape `--home`, MUST be rejected before any write.
 
 ### Item E. Outside this installer
 
 The following adapters are not materialized here:
 
 - Claude Code `.claude/rules/*.md` with `paths:` globs
-- Cursor `.mdc` files with `globs`
 - Grok PreToolUse language gate
 
-Until those exist, the executing Agent opens the matching scenario file under `hooks/criteria/` and the files listed in its `load:`.
+Until the missing adapters exist, the executing Agent opens the matching scenario file under `hooks/criteria/` and the files listed in its `load:`.

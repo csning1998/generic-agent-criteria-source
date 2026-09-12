@@ -13,6 +13,7 @@ load:
     - references/401-j-k_Secure_File_Editing_and_Identifier_Naming.md
 adapters:
     claude: { surface: rules, paths: ["**/*.tf", "**/*.hcl", "**/*.tfvars"] }
+    cursor: { surface: mdc, globs: "**/*.tf,**/*.hcl,**/*.tfvars,**/*.tofu,**/*.pkrvars.hcl" }
     grok: { surface: gate_until_read }
 ---
 

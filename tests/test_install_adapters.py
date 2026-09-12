@@ -31,15 +31,19 @@ def test_infer_grok_root_is_repo() -> None:
 
 
 def test_validate_dest_rejects_escape() -> None:
-    """Dest paths must stay under the three harness homes."""
+    """Dest paths must stay under the allow-listed harness homes."""
     with pytest.raises(ValueError, match="dest escapes"):
         validate_dest_rel(".agents/../.ssh/id")
     with pytest.raises(ValueError, match="protected dest"):
         validate_dest_rel(".claude")
+    with pytest.raises(ValueError, match="protected dest"):
+        validate_dest_rel(".cursor")
     with pytest.raises(ValueError, match="dest not in allow-list"):
         validate_dest_rel(".claude/settings.json")
     with pytest.raises(ValueError, match="dest not in allow-list"):
         validate_dest_rel(".claude/credentials.json")
+    with pytest.raises(ValueError, match="dest not in allow-list"):
+        validate_dest_rel(".cursor/settings.json")
     with pytest.raises(ValueError, match="absolute dest"):
         validate_dest_rel("/tmp/CLAUDE.md")
 
@@ -86,6 +90,11 @@ def test_apply_then_check_clean(tmp_path: Path) -> None:
     principles = home / ".agents" / "ENGINEERING_PRINCIPLES.md"
     assert principles.is_symlink()
     assert not (home / ".claude" / "settings.json").exists()
+    ts_mdc = home / ".cursor" / "rules" / "lang-typescript.mdc"
+    assert ts_mdc.is_file()
+    assert not ts_mdc.is_symlink()
+    assert "alwaysApply: false" in ts_mdc.read_text(encoding="utf-8")
+    assert not (home / ".cursor" / "settings.json").exists()
 
 
 def test_identical_regular_file_becomes_symlink(tmp_path: Path) -> None:
@@ -179,10 +188,14 @@ def test_default_command_is_check(tmp_path: Path) -> None:
 def test_module_has_no_subprocess() -> None:
     """The installer must not spawn a shell."""
     source = Path(__file__).resolve().parents[1] / "hooks" / "adapter_install"
-    text = (source / "install.py").read_text(encoding="utf-8")
-    assert "subprocess" not in text
-    assert "os.system" not in text
-    assert "os.popen" not in text
+    for path in source.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "subprocess" not in text
+        assert "os.system" not in text
+        assert "os.popen" not in text
+        assert "shutil." not in text
+        assert "cp -" not in text
+        assert "ln -" not in text
 
 
 def test_resolve_dest_stays_under_home(tmp_path: Path) -> None:

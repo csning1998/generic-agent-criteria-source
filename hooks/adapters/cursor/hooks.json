@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "hooks": {
+        "preToolUse": [
+            {
+                "command": "python3 hooks/gate-check.py",
+                "failClosed": true
+            }
+        ]
+    }
+}

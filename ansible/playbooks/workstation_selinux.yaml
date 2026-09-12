@@ -1,0 +1,7 @@
+---
+- name: "Play [SELinux]: Apply personal workstation mappings"
+  hosts: workstation
+  become: true
+  gather_facts: true
+  roles:
+    - workstation_selinux

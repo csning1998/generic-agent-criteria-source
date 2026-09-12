@@ -8,11 +8,21 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from adapter_install.cursor_mdc import iter_cursor_scenarios
+from adapter_install.cursor_mdc import render_cursor_mdc
+
 
 MODE_SYMLINK = "symlink"
 MODE_COPY = "copy"
-_ALLOWED_PREFIXES = (".agents/", ".claude/", ".gemini/", ".grok/")
-_PROTECTED_REL = (".claude", ".agents", ".gemini", ".grok")
+MODE_CURSOR_MDC = "cursor-mdc"
+_ALLOWED_PREFIXES = (
+    ".agents/",
+    ".claude/",
+    ".gemini/",
+    ".grok/",
+    ".cursor/",
+)
+_PROTECTED_REL = (".claude", ".agents", ".gemini", ".grok", ".cursor")
 
 
 @dataclass(frozen=True)
@@ -24,7 +34,7 @@ class AdapterSpec:
     mode: str
 
 
-SPECS: tuple[AdapterSpec, ...] = (
+_STATIC_SPECS: tuple[AdapterSpec, ...] = (
     AdapterSpec(
         source="rules/AGENT_CRITERIA.md",
         dest=".agents/AGENTS.md",
@@ -48,6 +58,16 @@ SPECS: tuple[AdapterSpec, ...] = (
     AdapterSpec(
         source="hooks/adapters/claude/post-write-review.py",
         dest=".claude/hooks/post-write-review.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
+        source="hooks/adapters/claude/gate-check.py",
+        dest=".cursor/hooks/gate-check.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
+        source="hooks/adapters/cursor/hooks.json",
+        dest=".cursor/hooks.json",
         mode=MODE_COPY,
     ),
     AdapterSpec(
@@ -153,6 +173,25 @@ def infer_grok_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _cursor_specs(grok_root: Path) -> tuple[AdapterSpec, ...]:
+    """Build Cursor `.mdc` specs from scenario `adapters.cursor`."""
+    specs: list[AdapterSpec] = []
+    for rel, parsed in iter_cursor_scenarios(grok_root):
+        specs.append(
+            AdapterSpec(
+                source=rel,
+                dest=f".cursor/rules/lang-{parsed.scenario_id}.mdc",
+                mode=MODE_CURSOR_MDC,
+            )
+        )
+    return tuple(specs)
+
+
+SPECS: tuple[AdapterSpec, ...] = _STATIC_SPECS + _cursor_specs(
+    infer_grok_root()
+)
+
+
 def _spec_dests() -> frozenset[str]:
     return frozenset(spec.dest for spec in SPECS)
 
@@ -176,10 +215,12 @@ def validate_dest_rel(dest_rel: str) -> None:
 
 def _validate_specs() -> None:
     for spec in SPECS:
-        if spec.mode not in (MODE_SYMLINK, MODE_COPY):
+        if spec.mode not in (MODE_SYMLINK, MODE_COPY, MODE_CURSOR_MDC):
             raise ValueError(f"unknown mode {spec.mode}")
         validate_dest_rel(spec.dest)
-        if spec.mode == MODE_COPY and spec.dest.endswith("/"):
+        if spec.mode in (MODE_COPY, MODE_CURSOR_MDC) and spec.dest.endswith(
+            "/"
+        ):
             raise ValueError(f"copy dest is a directory {spec.dest}")
 
 
@@ -278,6 +319,13 @@ def _iter_files(root: Path) -> tuple[Path, ...]:
     return tuple(sorted(files))
 
 
+def expected_payload(source: Path, mode: str) -> bytes:
+    """Return dest bytes for copy-like modes."""
+    if mode == MODE_CURSOR_MDC:
+        return render_cursor_mdc(source)
+    return _file_bytes(source)
+
+
 def trees_match(left: Path, right: Path) -> bool:
     """Return True when both paths exist and hold the same file bytes."""
     if left.is_file() and right.is_file():
@@ -325,10 +373,12 @@ def current_state(dest: Path, source: Path, mode: str) -> str:
                 return "regular-same"
             return "regular-differs"
         return "unexpected-type"
-    if dest.is_file() and source.is_file():
-        if trees_match(dest, source):
-            return "ok"
-        return "copy-differs"
+    if mode in (MODE_COPY, MODE_CURSOR_MDC):
+        if dest.is_file() and source.is_file():
+            if _file_bytes(dest) == expected_payload(source, mode):
+                return "ok"
+            return "copy-differs"
+        return "unexpected-type"
     return "unexpected-type"
 
 
@@ -407,8 +457,8 @@ def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as handle:
-            handle.write(source.read_bytes())
-        if source.stat().st_mode & 0o111:
+            handle.write(expected_payload(source, spec.mode))
+        if spec.mode == MODE_COPY and source.stat().st_mode & 0o111:
             tmp.chmod(tmp.stat().st_mode | 0o111)
         os.replace(tmp, dest)
     except BaseException:

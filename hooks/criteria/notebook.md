@@ -11,6 +11,7 @@ load:
     - references/401-h_Code_Comment_Decisions_and_Lifecycle.md
 adapters:
     claude: { surface: rules, paths: ["**/*.ipynb"] }
+    cursor: { surface: mdc, globs: "**/*.ipynb" }
     grok: { surface: gate_until_read }
 ---
 

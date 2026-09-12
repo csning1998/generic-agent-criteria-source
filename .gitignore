@@ -13,7 +13,7 @@
 !/tests/**
 !/.mdlrc
 !/.yamllint.yml
-!/README-Repository.md
+!/README.md
 !/.gitlab/
 !/.gitlab/**
 !/.vscode/
@@ -49,6 +49,10 @@ hooks/state
 # Tracked template only. Live ~/.grok/config.toml is rewritten by the TUI
 # (reasoning effort, theme, privacy ack) and stays covered by /*.
 !/config.example.toml
+
+# Personal workstation SELinux playbooks. Not consumed by Grok at runtime.
+!/ansible/
+!/ansible/**
 
 # GitLab project provision layer. Local .terraform and state files stay ignored.
 !/terraform/

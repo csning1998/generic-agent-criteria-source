@@ -58,7 +58,7 @@ def _module_path(tmp_path: Path) -> str:
 def _layer_path(tmp_path: Path) -> str:
     return str(
         tmp_path
-        / "meta-platform/terraform/layers/shared-harbor-frontend/main.tf"
+        / "meta-platform/terraform/layers/platform-harbor-frontend/main.tf"
     )
 
 
@@ -182,27 +182,33 @@ def test_guest_debug_and_readonly_commands(workspace: Path) -> None:
 
 
 def test_legacy_harbor_origin_name_gate(workspace: Path) -> None:
-    """New bootstrapper paths are denied. Existing leftover trees stay."""
+    """New bootstrapper paths are denied. harbor-origin trees stay."""
     payload = _payload(workspace)
     planning = workspace / "planning"
     record_read(payload, str(planning / "decisions.md"))
     record_read(payload, str(planning / "architecture.md"))
-    leftover = (
+    origin_layer = (
         workspace
-        / "meta-platform/terraform/layers/shared-harbor-bootstrapper-frontend"
+        / "meta-platform/terraform/layers/platform-harbor-origin-frontend"
     )
-    leftover.mkdir(parents=True)
-    new_path = str(
+    origin_layer.mkdir(parents=True)
+    new_bootstrapper = str(
         workspace
         / "meta-platform/terraform/layers/new-harbor-bootstrapper/main.tf"
     )
+    new_origin = str(
+        workspace / "meta-platform/terraform/layers/new-harbor-origin/main.tf"
+    )
     assert "Name gate" in (
-        evaluate_write(payload, new_path, "locals {}\n", "") or ""
+        evaluate_write(payload, new_bootstrapper, "locals {}\n", "") or ""
     )
     assert (
-        evaluate_write(payload, str(leftover / "data.tf"), "locals {}\n", "")
+        evaluate_write(
+            payload, str(origin_layer / "data.tf"), "locals {}\n", ""
+        )
         is None
     )
+    assert evaluate_write(payload, new_origin, "locals {}\n", "") is None
 
 
 def test_ansible_and_iac_sql(workspace: Path) -> None:
@@ -212,7 +218,8 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
     record_read(payload, str(planning / "decisions.md"))
     record_read(payload, str(planning / "architecture.md"))
     play = (
-        workspace / "meta-platform/ansible/roles/shared_harbor/tasks/keep.yaml"
+        workspace
+        / "meta-platform/ansible/roles/platform_harbor/tasks/keep.yaml"
     )
     play.parent.mkdir(parents=True, exist_ok=True)
     existing = "- name: already present\n  ansible.builtin.shell: echo hi\n"
@@ -241,7 +248,7 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
         evaluate_write(
             payload,
             str(
-                workspace / "meta-platform/ansible/roles/shared_harbor/tasks/"
+                workspace / "meta-platform/ansible/roles/platform_harbor/tasks/"
                 "C-deploy.yaml"
             ),
             "- ansible.builtin.shell: psql -c 'select 1'\n",

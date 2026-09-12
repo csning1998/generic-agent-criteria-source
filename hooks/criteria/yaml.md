@@ -13,6 +13,7 @@ load:
     - references/401-j-k_Secure_File_Editing_and_Identifier_Naming.md
 adapters:
     claude: { surface: rules, paths: ["**/*.yaml", "**/*.yml", "**/*.j2"] }
+    cursor: { surface: mdc, globs: "**/*.yaml,**/*.yml,**/*.j2" }
     grok: { surface: gate_until_read }
 ---
 

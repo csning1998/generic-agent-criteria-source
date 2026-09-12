@@ -19,11 +19,13 @@ from typing import NoReturn
 
 
 CRITERIA_DIR = Path.home() / ".agents" / "criteria"
-STATE_DIR = Path(f"/tmp/claude-gate-state-{os.getuid()}")
+STATE_DIR: Path | None = None
 
 HARD_DENY_COMMAND_SUBSTRINGS = ("git push --force", "git push -f", "rm -rf")
 NOTEBOOK_GLOBS = ("*.ipynb",)
 EXEC_PHRASES = ("Approve", "Accept", "Agree", "Consent", "Permit", "Execute")
+WRITE_TOOLS = frozenset({"Edit", "Write", "StrReplace", "TabWrite"})
+SHELL_TOOLS = frozenset({"Bash", "Shell"})
 
 # Rule 401(f): flags the standalone pronoun form following a comment
 # marker anywhere on the line, including a trailing comment after code,
@@ -143,9 +145,17 @@ def resolve_load_text(meta: dict) -> str:
     return "\n\n".join(parts)
 
 
+def state_dir() -> Path:
+    """Return the session marker tree for this materialized adapter."""
+    if STATE_DIR is not None:
+        return STATE_DIR
+    label = "cursor" if cursor_protocol() else "claude"
+    return Path(f"/tmp/{label}-gate-state-{os.getuid()}")
+
+
 def marker(session_id: str, scenario_id: str) -> Path:
     """Return the session-scoped gate-state marker path for a scenario."""
-    return STATE_DIR / session_id / scenario_id
+    return state_dir() / session_id / scenario_id
 
 
 def already_surfaced(session_id: str, scenario_id: str) -> bool:
@@ -206,8 +216,27 @@ def _block_text(block) -> str:
     return block.get("text", "")
 
 
+def cursor_protocol() -> bool:
+    """Return True when this file lives under a Cursor hooks directory."""
+    return "/.cursor/" in Path(__file__).resolve().as_posix()
+
+
 def deny(reason: str, additional_context: str | None = None) -> NoReturn:
     """Emit a PreToolUse deny decision and exit."""
+    if cursor_protocol():
+        message = reason
+        if additional_context:
+            message = reason + "\n\n" + additional_context
+        print(
+            json.dumps(
+                {
+                    "permission": "deny",
+                    "agent_message": message,
+                    "user_message": reason,
+                }
+            )
+        )
+        sys.exit(0)
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -223,6 +252,9 @@ def deny(reason: str, additional_context: str | None = None) -> NoReturn:
 
 def allow() -> NoReturn:
     """Emit a PreToolUse allow decision and exit."""
+    if cursor_protocol():
+        print(json.dumps({"permission": "allow"}))
+        sys.exit(0)
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -333,7 +365,7 @@ def handle_bash(payload: dict, scenarios: list[dict]) -> None:
         prefix in command for prefix in ext_write.get("command_prefix", [])
     ):
         # Allowlist model: a git/glab/gh invocation is authorized only against
-        # a known read-only pattern; an unmatched command, including an
+        # a known read-only pattern. An unmatched command, including an
         # unenumerated write subcommand, requires the execution phrase.
         if any(
             p in command for p in ext_write.get("readonly_command_glob", [])
@@ -355,14 +387,53 @@ def handle_bash(payload: dict, scenarios: list[dict]) -> None:
     gate_once(session_id, meta)
 
 
+def normalize_payload(raw: dict) -> dict:
+    """Map Claude and Cursor PreToolUse envelopes onto one field set."""
+    tool_name = str(
+        raw.get("tool_name") or raw.get("toolName") or raw.get("tool") or ""
+    )
+    session_id = str(
+        raw.get("session_id")
+        or raw.get("conversation_id")
+        or raw.get("conversationId")
+        or "unknown"
+    )
+    tool_input = raw.get("tool_input") or raw.get("arguments") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    path = (
+        tool_input.get("file_path")
+        or tool_input.get("path")
+        or tool_input.get("filePath")
+        or ""
+    )
+    content = tool_input.get("content")
+    if not isinstance(content, str):
+        contents = tool_input.get("contents")
+        content = contents if isinstance(contents, str) else ""
+    command_text = tool_input.get("command") or raw.get("command") or ""
+    normalized_input = dict(tool_input)
+    if path:
+        normalized_input["file_path"] = str(path)
+    if content:
+        normalized_input["content"] = content
+    if isinstance(command_text, str) and command_text:
+        normalized_input["command"] = command_text
+    mapped = dict(raw)
+    mapped["tool_name"] = tool_name
+    mapped["session_id"] = session_id
+    mapped["tool_input"] = normalized_input
+    return mapped
+
+
 def main() -> None:
     """Read the PreToolUse payload from stdin and dispatch by tool_name."""
-    payload = json.load(sys.stdin)
+    payload = normalize_payload(json.load(sys.stdin))
     tool_name = payload.get("tool_name", "")
     scenarios = load_scenarios()
-    if tool_name in ("Edit", "Write"):
+    if tool_name in WRITE_TOOLS:
         handle_edit_write(payload, scenarios)
-    elif tool_name == "Bash":
+    elif tool_name in SHELL_TOOLS:
         handle_bash(payload, scenarios)
     else:
         allow()

@@ -1,0 +1,87 @@
+---
+# Public contract. Callers MAY override these keys.
+# ansible_user_dir supplies the home prefix. A hardcoded home path is forbidden.
+workstation_selinux_gitlab_root: "{{ ansible_facts['user_dir'] }}/GitLab"
+workstation_selinux_user_uid: "{{ ansible_facts['user_uid'] }}"
+workstation_selinux_local_dir: "/etc/selinux/local"
+workstation_selinux_policy_module: workstation_nnp_container_runtime
+# become: true gathers facts as root. A numeric-UID regex labels every
+# user-session Podman API directory. gitlab-runner dials that tree as
+# unix:///run/podman/podman.sock after a bind mount.
+workstation_selinux_podman_sock: "/run/user/[0-9]+/podman(/.*)?"
+workstation_selinux_on_premise_agent_names:
+  - vault
+  - ollama_data
+  - open-webui_data
+  - searxng_data
+  - pipelines
+  - openclaw
+  - openclaw_data
+workstation_selinux_on_premise_agent_rel: >-
+  {{ '/personal/on-premise-agent/('
+  ~ (workstation_selinux_on_premise_agent_names | join('|'))
+  ~ ')(/.*)?' }}
+
+workstation_selinux_fcontext_present:
+  - target: "{{ workstation_selinux_gitlab_root }}/meta-platform/(vault|sonarqube|runner-config)(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/meta-platform/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/gitlab-ci-with-code-reviewer/runner-config(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/gitlab-ci-with-code-reviewer/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root ~ workstation_selinux_on_premise_agent_rel }}"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/on-premise-agent/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/on-premise-gitlab-deployment(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/second-brain/(postgres-data|db/migrations)(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/second-brain/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/app-content-matter/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/LaTeX_Documents/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/monte-carlo-portfolio-trader/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/template/template-project/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/template/template-project-fullstack/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_gitlab_root }}/meta-platform-credentials/.git(/.*)?"
+    ftype: a
+  - target: "{{ workstation_selinux_podman_sock }}"
+    ftype: a
+
+workstation_selinux_fcontext_absent:
+  - target: "runner-config(/.*)?"
+  - target: "vault(/.*)?"
+  - target: "sonarqube(/.*)?"
+  - target: "\\.git(/.*)?"
+  - target: "{{ workstation_selinux_gitlab_root }}/personal/on-premise-gitlab-deployment/vault(/.*)?"
+  - target: "/run/spire-agent/public(/.*)?"
+
+workstation_selinux_restorecon_paths:
+  - "{{ workstation_selinux_gitlab_root }}/meta-platform/vault"
+  - "{{ workstation_selinux_gitlab_root }}/meta-platform/sonarqube"
+  - "{{ workstation_selinux_gitlab_root }}/meta-platform/runner-config"
+  - "{{ workstation_selinux_gitlab_root }}/meta-platform/.git"
+  - "{{ workstation_selinux_gitlab_root }}/gitlab-ci-with-code-reviewer/runner-config"
+  - "{{ workstation_selinux_gitlab_root }}/gitlab-ci-with-code-reviewer/.git"
+  - "{{ workstation_selinux_gitlab_root }}/personal/on-premise-agent"
+  - "{{ workstation_selinux_gitlab_root }}/personal/on-premise-gitlab-deployment"
+  - "{{ workstation_selinux_gitlab_root }}/personal/second-brain/postgres-data"
+  - "{{ workstation_selinux_gitlab_root }}/personal/second-brain/db/migrations"
+  - "{{ workstation_selinux_gitlab_root }}/personal/second-brain/.git"
+  - "{{ workstation_selinux_gitlab_root }}/personal/app-content-matter/.git"
+  - "{{ workstation_selinux_gitlab_root }}/personal/LaTeX_Documents/.git"
+  - "{{ workstation_selinux_gitlab_root }}/personal/monte-carlo-portfolio-trader/.git"
+  - "{{ workstation_selinux_gitlab_root }}/template/template-project/.git"
+  - "{{ workstation_selinux_gitlab_root }}/template/template-project-fullstack/.git"
+  - "{{ workstation_selinux_gitlab_root }}/.git"
+  - "{{ workstation_selinux_gitlab_root }}/meta-platform-credentials/.git"

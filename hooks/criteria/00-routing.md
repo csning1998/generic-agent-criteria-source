@@ -48,15 +48,14 @@ Grok does not load this file at session start. Open it when a task hits more tha
 
 ## Section 3. What is not wired yet
 
-Resident distill, skill bodies, the Claude thin shell, and `~/.agents/criteria` are materialized by `hooks/bin/install-adapters.py`. Claude `.claude/rules` with `paths:` globs, Cursor `.mdc` files, and the Grok PreToolUse language gate are outside that installer. Those three adapters are not installed yet:
+Resident distill, skill bodies, the Claude thin shell, `~/.agents/criteria`, and Cursor `.mdc` glob rules are materialized by `hooks/bin/install-adapters.py`. Claude `.claude/rules` with `paths:` globs and the Grok PreToolUse language gate remain outside that installer:
 
 - Claude Code `.claude/rules/*.md` with `paths:` globs
-- Cursor `.mdc` with `globs`
 - Grok PreToolUse that denies a write until the matching spec was `read_file` this session
 
-Until those exist, the executing Agent still opens the matching scenario file in Section 1 and the files listed in its `load:`, and does not preload unrelated scenarios.
+Cursor `.mdc` files are rendered from scenario `adapters.cursor`. The `.mdc` body cites each `load:` path. The executing Agent still opens those files. Unrelated scenarios are not preloaded.
 
-Claude Code does have a PostToolUse self-review hook, distinct from the three gaps above: `hooks/adapters/claude/post-write-review.py`, materialized to `.claude/hooks/post-write-review.py` by the same installer. It fires after every `Edit`/`Write`. It matches the written path against Section 1 Item A's `path_glob` table. It surfaces the matched scenario's `load:` files as `additionalContext`. The `additionalContext` instructs the Agent to re-check the file just written against those `load:` files and to fix any violation directly instead of only acknowledging the violation. `gate-check.py` (PreToolUse) gates writing before the fact; this hook reviews after the fact. Since both hooks track "surfaced" state independently per session against the same `~/.agents/criteria` tree, a scenario already surfaced pre-write still gets surfaced again post-write.
+Claude Code does have a PostToolUse self-review hook, distinct from the two gaps above: `hooks/adapters/claude/post-write-review.py`, materialized to `.claude/hooks/post-write-review.py` by the same installer. It fires after every `Edit`/`Write`. It matches the written path against Section 1 Item A's `path_glob` table. It surfaces the matched scenario's `load:` files as `additionalContext`. The `additionalContext` instructs the Agent to re-check the file just written against those `load:` files and to fix any violation directly instead of only acknowledging the violation. `gate-check.py` (PreToolUse) gates writing before the fact; this hook reviews after the fact. Since both hooks track "surfaced" state independently per session against the same `~/.agents/criteria` tree, a scenario already surfaced pre-write still gets surfaced again post-write.
 
 ## Section 4. Full criterion files
 

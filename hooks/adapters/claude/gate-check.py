@@ -23,16 +23,33 @@ STATE_DIR: Path | None = None
 
 HARD_DENY_COMMAND_SUBSTRINGS = ("git push --force", "git push -f", "rm -rf")
 NOTEBOOK_GLOBS = ("*.ipynb",)
-EXEC_PHRASES = ("Approve", "Accept", "Agree", "Consent", "Permit", "Execute")
+EXEC_PHRASES = (
+    "Approve",
+    "Accept",
+    "Agree",
+    "Consent",
+    "Permit",
+    "Execute",
+    "去執行",
+    "跑這個",
+    "請執行",
+    "執行吧",
+)
 WRITE_TOOLS = frozenset({"Edit", "Write", "StrReplace", "TabWrite"})
 SHELL_TOOLS = frozenset({"Bash", "Shell"})
-
-# Rule 401(f): flags the standalone pronoun form following a comment
-# marker anywhere on the line, including a trailing comment after code,
-# excluding demonstrative-adjective uses that modify a following noun.
-BARE_IT_PATTERN = re.compile(r"(?:#|//).*\bit\b", re.IGNORECASE)
-COMMENT_CHECK_SKIP_GLOBS = ("*.md", "*.mdx")
-
+CURSOR_MCP_WRITE_MARKERS = (
+    "save_note",
+    "save_merge_request_review",
+    "save_merge_request",
+    "create_issue",
+    "create_pull_request",
+    "add_issue_comment",
+    "add_comment_to_pending_review",
+    "pull_request_review_write",
+    "issue_write",
+    "merge_pull_request",
+    "accept_merge_request",
+)
 
 ARRAY_KEYS = (
     "path_glob",
@@ -114,14 +131,29 @@ def load_scenarios() -> list[dict]:
     return scenarios
 
 
+def _path_glob_specificity(pattern: str) -> int:
+    """Score a path_glob pattern by its literal character count."""
+    return sum(1 for char in pattern if char not in "*?")
+
+
 def match_path(scenarios: list[dict], file_path: str) -> dict | None:
-    """Return the first scenario whose path_glob matches file_path's name."""
+    """Return the scenario whose path_glob best matches file_path's name.
+
+    When several scenarios match, the highest specificity score wins.
+    A literal `merge-request.md` therefore beats a broad `*.md`.
+    """
     name = Path(file_path).name
+    best: dict | None = None
+    best_score = -10_000
     for meta in scenarios:
         for pattern in meta.get("path_glob", []):
-            if fnmatch.fnmatch(name, pattern):
-                return meta
-    return None
+            if not fnmatch.fnmatch(name, pattern):
+                continue
+            score = _path_glob_specificity(pattern)
+            if score > best_score:
+                best_score = score
+                best = meta
+    return best
 
 
 def match_command(scenarios: list[dict], command: str) -> dict | None:
@@ -173,8 +205,10 @@ def mark_surfaced(session_id: str, scenario_id: str) -> None:
 
 def last_user_message(transcript_path: str) -> str:
     """Extract and aggregate all user-attributable text within the turn."""
+    if not transcript_path:
+        return ""
     path = Path(transcript_path)
-    if not path.exists():
+    if not path.is_file():
         return ""
     buffer: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -265,6 +299,58 @@ def allow() -> NoReturn:
     sys.exit(0)
 
 
+def ask(reason: str) -> NoReturn:
+    """Emit Cursor native ask. Claude Code never takes this path."""
+    print(
+        json.dumps(
+            {
+                "permission": "ask",
+                "user_message": reason,
+                "agent_message": reason,
+            }
+        )
+    )
+    sys.exit(0)
+
+
+def _tool_name_has_marker(lowered: str, marker: str) -> bool:
+    """True when marker is a tool-id token, not a prefix of a longer token."""
+    if not marker:
+        return False
+    start = 0
+    while True:
+        idx = lowered.find(marker, start)
+        if idx == -1:
+            return False
+        end = idx + len(marker)
+        if end < len(lowered) and (
+            lowered[end].isalnum() or lowered[end] == "_"
+        ):
+            start = idx + 1
+            continue
+        if idx == 0:
+            return True
+        prev = lowered[idx - 1]
+        if prev in "-:." or prev.isspace():
+            return True
+        if prev == "_" and (idx >= 2 and lowered[idx - 2] == "_"):
+            return True
+        if not (prev.isalnum() or prev == "_"):
+            return True
+        start = idx + 1
+
+
+def is_cursor_mcp_external_write(tool_name: str) -> bool:
+    """Return True for Cursor MCP tools which mutate GitLab or GitHub state."""
+    if not cursor_protocol():
+        return False
+    lowered = tool_name.lower()
+    return any(
+        _tool_name_has_marker(lowered, marker)
+        for marker in CURSOR_MCP_WRITE_MARKERS
+    )
+
+
 def gate_once(session_id: str, meta: dict) -> None:
     """Allow a scenario's 2nd call this session; deny and surface the 1st."""
     if already_surfaced(session_id, meta["id"]):
@@ -277,34 +363,6 @@ def gate_once(session_id: str, meta: dict) -> None:
     )
 
 
-def find_bare_it_violation(text: str) -> str | None:
-    """Return the first comment line containing a bare pronoun 'it', if any."""
-    for line in text.splitlines():
-        if BARE_IT_PATTERN.search(line):
-            return line.strip()
-    return None
-
-
-def resulting_text(tool_input: dict, file_path: str) -> str:
-    """Return the post-write text an Edit or Write call would produce.
-
-    An Edit call's `new_string` alone omits unchanged surrounding text,
-    which would miss a violation spanning the old/new boundary; this
-    merges `new_string` into the on-disk file the same way Edit applies it.
-    """
-    if "new_string" not in tool_input:
-        return tool_input.get("content", "")
-    old_string = tool_input.get("old_string", "")
-    new_string = tool_input.get("new_string", "")
-    try:
-        current = Path(file_path).read_text(encoding="utf-8")
-    except OSError:
-        return new_string
-    if tool_input.get("replace_all"):
-        return current.replace(old_string, new_string)
-    return current.replace(old_string, new_string, 1)
-
-
 def handle_edit_write(payload: dict, scenarios: list[dict]) -> None:
     """Gate an Edit/Write tool call against path_glob-routed scenarios."""
     session_id = payload.get("session_id", "unknown")
@@ -315,16 +373,6 @@ def handle_edit_write(payload: dict, scenarios: list[dict]) -> None:
             "notebook.md: disk mutation of .ipynb is prohibited in every case; "
             "use Literature Programming in-session instead."
         )
-    skip = COMMENT_CHECK_SKIP_GLOBS
-    if not any(fnmatch.fnmatch(Path(file_path).name, g) for g in skip):
-        write_text = resulting_text(tool_input, file_path)
-        violation = find_bare_it_violation(write_text)
-        if violation:
-            deny(
-                "401-f register: a comment line uses the bare pronoun "
-                "'it' with no noun a cold reader can point to. Name "
-                f"the concrete noun instead. Flagged line: {violation!r}"
-            )
     meta = match_path(scenarios, file_path)
     if meta is None:
         meta = next(
@@ -337,18 +385,24 @@ def handle_edit_write(payload: dict, scenarios: list[dict]) -> None:
 
 
 def require_exec_phrase(payload: dict, reason: str) -> None:
-    """Deny unless an EXEC_PHRASES token appears in the current user turn."""
+    """Cursor ask covers PreToolUse without an AskUserQuestion transcript."""
     prompt_text = last_user_message(payload.get("transcript_path", ""))
-    if not any(phrase in prompt_text for phrase in EXEC_PHRASES):
-        deny(
-            f"external-write.md: {reason} requires explicit execution "
-            "authorization in the current user turn. Call AskUserQuestion now "
-            "with an option whose label is exactly Approve "
-            "(plus a Deny option), state what will run and that it is "
-            "irreversible if applicable, then retry this call after the "
-            "answer comes back. Do not wait for the owner to type the phrase "
-            "unprompted."
-        )
+    if any(phrase in prompt_text for phrase in EXEC_PHRASES):
+        return
+    message = (
+        f"external-write.md: {reason} requires explicit execution "
+        "authorization in the current user turn."
+    )
+    if cursor_protocol():
+        ask(message + " Approve this tool call in the Cursor permission card.")
+    deny(
+        message + " Call AskUserQuestion now "
+        "with an option whose label is exactly Approve "
+        "(plus a Deny option), state what will run and that it is "
+        "irreversible if applicable, then retry this call after the "
+        "answer comes back. Do not wait for the owner to type the phrase "
+        "unprompted."
+    )
 
 
 def handle_bash(payload: dict, scenarios: list[dict]) -> None:
@@ -435,6 +489,9 @@ def main() -> None:
         handle_edit_write(payload, scenarios)
     elif tool_name in SHELL_TOOLS:
         handle_bash(payload, scenarios)
+    elif is_cursor_mcp_external_write(tool_name):
+        require_exec_phrase(payload, f"MCP tool '{tool_name}'")
+        allow()
     else:
         allow()
 

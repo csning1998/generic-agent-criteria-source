@@ -66,6 +66,21 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
         mode=MODE_COPY,
     ),
     AdapterSpec(
+        source="hooks/adapters/claude/post-write-review.py",
+        dest=".cursor/hooks/post-write-review.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
+        source="hooks/adapters/cursor/stop-output-scan.py",
+        dest=".cursor/hooks/stop-output-scan.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
+        source="hooks/adapters/cursor/skill-module-gate.py",
+        dest=".cursor/hooks/skill-module-gate.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
         source="hooks/adapters/cursor/hooks.json",
         dest=".cursor/hooks.json",
         mode=MODE_COPY,

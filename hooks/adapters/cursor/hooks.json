@@ -5,6 +5,22 @@
             {
                 "command": "python3 hooks/gate-check.py",
                 "failClosed": true
+            },
+            {
+                "command": "python3 hooks/skill-module-gate.py",
+                "failClosed": true
+            }
+        ],
+        "postToolUse": [
+            {
+                "command": "python3 hooks/post-write-review.py",
+                "failClosed": true
+            }
+        ],
+        "stop": [
+            {
+                "command": "python3 hooks/stop-output-scan.py",
+                "loop_limit": 3
             }
         ]
     }

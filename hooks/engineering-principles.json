@@ -24,7 +24,17 @@
         ],
         "PreToolUse": [
             {
-                "matcher": "Write|Edit|Bash|Read|search_replace|read_file|run_terminal_command|MultiEdit",
+                "matcher": "Write|Edit|Bash|Read|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bin/engineering-principles.py",
+                        "timeout": 15
+                    }
+                ]
+            },
+            {
+                "matcher": "search_replace|read_file|run_terminal_command",
                 "hooks": [
                     {
                         "type": "command",
@@ -36,7 +46,17 @@
         ],
         "PostToolUse": [
             {
-                "matcher": "Read|read_file|Write|Edit|Bash|search_replace|run_terminal_command|MultiEdit",
+                "matcher": "Read|read_file|Write|Edit|Bash|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bin/engineering-principles.py",
+                        "timeout": 15
+                    }
+                ]
+            },
+            {
+                "matcher": "search_replace|run_terminal_command",
                 "hooks": [
                     {
                         "type": "command",

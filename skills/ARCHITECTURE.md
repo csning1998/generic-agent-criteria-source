@@ -33,11 +33,11 @@ Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.g
 
 ### Item A. Media ingest
 
-- Layers: `skill-yt-dlp`, `skill-buzz-transcribe`, `skill-youtube-to-resources`
+- Layers: `skill-yt-dlp`, `skill-buzz-transcribe`, `skill-transcribe-youtube-video-to-notion-resources`
 - Modules: `skill-module-yt-dlp`, `skill-module-buzz-transcribe`, `skill-module-media-tags`
 - Artifacts: `WatchMedia`, `TranscriptDone`, `MediaTags`, `VideoResourcePayload`
 
-`skill-youtube-to-resources` sequences download, transcribe, and Notion write. YouTube fill lives only in that layer.
+`skill-transcribe-youtube-video-to-notion-resources` sequences download, transcribe, and Notion write. YouTube fill lives only in that layer.
 
 ### Item B. Knowledge filing
 

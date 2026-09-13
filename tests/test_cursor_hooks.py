@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from adapter_install.install import SPECS
-from adapter_install.install import run_apply
+from adapter_install.install import execute_apply
 from adapter_install.install import validate_dest_rel
 
 
@@ -85,7 +85,7 @@ def test_normalize_maps_cursor_write_fields() -> None:
     assert mapped["tool_input"]["content"] == "# Title\n"
 
 
-def test_cursor_protocol_denies_first_markdown_write(
+def test_intercept_edit_write_denies_first_markdown_write_under_cursor_runtime(
     cursor_argv, isolated_criteria: Path, capsys
 ) -> None:
     """The first markdown Write is denied and load text is returned."""
@@ -100,13 +100,13 @@ def test_cursor_protocol_denies_first_markdown_write(
         }
     )
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, gate_check.load_scenarios())
+        gate_check.intercept_edit_write(payload, gate_check.load_scenarios())
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
     assert "markdown L2 body" in out["agent_message"]
 
 
-def test_cursor_protocol_allows_retry(
+def test_intercept_edit_write_allows_retry_under_cursor_runtime(
     cursor_argv, isolated_criteria: Path, capsys
 ) -> None:
     """A second markdown Write in the same session is allowed."""
@@ -123,15 +123,15 @@ def test_cursor_protocol_allows_retry(
     )
     scenarios = gate_check.load_scenarios()
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios)
+        gate_check.intercept_edit_write(payload, scenarios)
     capsys.readouterr()
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios)
+        gate_check.intercept_edit_write(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out == {"permission": "allow"}
 
 
-def test_match_path_prefers_specific_glob_over_broad_markdown() -> None:
+def test_find_most_specific_scenario_prefers_specific_glob() -> None:
     """A literal path_glob wins over a broader *.md glob."""
     scenarios = [
         {"id": "broad-md", "path_glob": ["*.md", "*.mdx"]},
@@ -141,18 +141,26 @@ def test_match_path_prefers_specific_glob_over_broad_markdown() -> None:
         },
     ]
     assert (
-        gate_check.match_path(scenarios, "/repo/exact-target.md")["id"]
+        gate_check.find_most_specific_scenario(
+            scenarios, "/repo/exact-target.md"
+        )["id"]
         == "narrow"
     )
-    alt = gate_check.match_path(scenarios, "/repo/alt-target.md")
+    alt = gate_check.find_most_specific_scenario(
+        scenarios, "/repo/alt-target.md"
+    )
     assert alt["id"] == "narrow"
-    nested = gate_check.match_path(scenarios, "/repo/prefix_NESTED_suffix.md")
+    nested = gate_check.find_most_specific_scenario(
+        scenarios, "/repo/prefix_NESTED_suffix.md"
+    )
     assert nested["id"] == "narrow"
-    other = gate_check.match_path(scenarios, "/repo/other.md")
+    other = gate_check.find_most_specific_scenario(scenarios, "/repo/other.md")
     assert other["id"] == "broad-md"
 
 
-def test_match_path_prefers_tdd_glob_over_broad_python() -> None:
+def test_find_most_specific_scenario_prefers_tdd_glob_over_broad_python() -> (
+    None
+):
     """A TDD-style path_glob wins over a broader *.py glob."""
     scenarios = [
         {"id": "broad-py", "path_glob": ["*.py"]},
@@ -170,13 +178,22 @@ def test_match_path_prefers_tdd_glob_over_broad_python() -> None:
         },
     ]
     assert (
-        gate_check.match_path(scenarios, "/repo/module_test.py")["id"] == "tdd"
+        gate_check.find_most_specific_scenario(
+            scenarios, "/repo/module_test.py"
+        )["id"]
+        == "tdd"
     )
     assert (
-        gate_check.match_path(scenarios, "/repo/module.py")["id"] == "broad-py"
+        gate_check.find_most_specific_scenario(scenarios, "/repo/module.py")[
+            "id"
+        ]
+        == "broad-py"
     )
     assert (
-        gate_check.match_path(scenarios, "/repo/widget.test.ts")["id"] == "tdd"
+        gate_check.find_most_specific_scenario(
+            scenarios, "/repo/widget.test.ts"
+        )["id"]
+        == "tdd"
     )
 
 
@@ -243,7 +260,7 @@ def specificity_gate_criteria(
         "prefix_NESTED_suffix.md",
     ],
 )
-def test_cursor_gate_once_surfaces_narrow_scenario_load(
+def test_cursor_intercept_edit_write_narrow_scenario_denies_and_injects_context(
     cursor_argv,
     specificity_gate_criteria: Path,
     filename: str,
@@ -262,19 +279,19 @@ def test_cursor_gate_once_surfaces_narrow_scenario_load(
         }
     )
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, gate_check.load_scenarios())
+        gate_check.intercept_edit_write(payload, gate_check.load_scenarios())
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
     assert "NARROW_LOAD_A_MARKER" in out["agent_message"]
     assert "NARROW_LOAD_B_MARKER" in out["agent_message"]
 
 
-def test_cursor_gate_once_broad_md_gets_broad_load_only(
+def test_cursor_intercept_edit_write_broad_scenario_injects_broad_context_only(
     cursor_argv, specificity_gate_criteria: Path, capsys
 ) -> None:
     """A path matched only by *.md gets the broad scenario load."""
     scenarios = gate_check.load_scenarios()
-    meta = gate_check.match_path(scenarios, "/repo/other.md")
+    meta = gate_check.find_most_specific_scenario(scenarios, "/repo/other.md")
     assert meta["id"] == "broad-md"
     target = specificity_gate_criteria / "other.md"
     payload = gate_check.normalize_payload(
@@ -288,7 +305,7 @@ def test_cursor_gate_once_broad_md_gets_broad_load_only(
         }
     )
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios)
+        gate_check.intercept_edit_write(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
     assert "BROAD_LOAD_MARKER" in out["agent_message"]
@@ -300,7 +317,7 @@ def test_apply_materializes_cursor_gate_files(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     root = Path(__file__).resolve().parent.parent
-    assert run_apply(root, home) == 0
+    assert execute_apply(root, home) == 0
     hooks = home / ".cursor" / "hooks"
     gate = hooks / "gate-check.py"
     post = hooks / "post-write-review.py"
@@ -378,7 +395,7 @@ def test_cursor_hooks_json_source_wires_pre_post_stop() -> None:
     assert "stop-output-scan.py" in hooks["stop"][0]["command"]
 
 
-def test_cursor_protocol_ignores_relative_argv(
+def test_is_cursor_runtime_ignores_relative_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User-hook argv `hooks/gate-check.py` still selects Cursor JSON."""
@@ -386,14 +403,14 @@ def test_cursor_protocol_ignores_relative_argv(
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.cursor/hooks/gate-check.py"
     )
-    assert gate_check.cursor_protocol() is True
+    assert gate_check.is_cursor_runtime() is True
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.claude/hooks/gate-check.py"
     )
-    assert gate_check.cursor_protocol() is False
+    assert gate_check.is_cursor_runtime() is False
 
 
-def test_state_dir_uses_cursor_tree_when_unoverridden(
+def test_resolve_state_directory_uses_cursor_tree_when_unoverridden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unset STATE_DIR follows the materialized adapter, not argv."""
@@ -403,11 +420,15 @@ def test_state_dir_uses_cursor_tree_when_unoverridden(
         gate_check, "__file__", "/tmp/home/.cursor/hooks/gate-check.py"
     )
     uid = os.getuid()
-    assert gate_check.state_dir() == Path(f"/tmp/cursor-gate-state-{uid}")
+    assert gate_check.resolve_state_directory() == Path(
+        f"/tmp/cursor-gate-state-{uid}"
+    )
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.claude/hooks/gate-check.py"
     )
-    assert gate_check.state_dir() == Path(f"/tmp/claude-gate-state-{uid}")
+    assert gate_check.resolve_state_directory() == Path(
+        f"/tmp/claude-gate-state-{uid}"
+    )
 
 
 @pytest.fixture
@@ -576,7 +597,7 @@ def test_post_write_surfaces_scenario_load_on_clean_cursor_write(
     assert "style L2 body" in context
 
 
-def test_post_write_state_dir_follows_cursor_hooks_path(
+def test_resolve_state_directory_follows_cursor_hooks_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unset post-write STATE_DIR follows the Cursor materialized path."""
@@ -587,7 +608,7 @@ def test_post_write_state_dir_follows_cursor_hooks_path(
         "/tmp/home/.cursor/hooks/post-write-review.py",
     )
     uid = os.getuid()
-    assert post_write_review.state_dir() == Path(
+    assert post_write_review.resolve_state_directory() == Path(
         f"/tmp/cursor-gate-state-{uid}"
     )
 
@@ -613,7 +634,7 @@ def test_cursor_pre_allows_bare_pronoun_comment(
         }
     )
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios=[])
+        gate_check.intercept_edit_write(payload, scenarios=[])
     out = json.loads(capsys.readouterr().out)
     assert out == {"permission": "allow"}
 
@@ -628,7 +649,7 @@ def test_cursor_hard_denies_force_push(
         "tool_input": {"command": "git push --force origin HEAD"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios=[])
+        gate_check.intercept_bash(payload, scenarios=[])
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
     assert (
@@ -647,7 +668,7 @@ def test_cursor_hard_denies_rm_rf(
         "tool_input": {"command": "rm -rf /tmp/demo"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios=[])
+        gate_check.intercept_bash(payload, scenarios=[])
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
 
@@ -670,7 +691,7 @@ def test_cursor_denies_notebook_write(
         }
     )
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios=[])
+        gate_check.intercept_edit_write(payload, scenarios=[])
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
     assert "notebook" in out["user_message"].lower()
@@ -718,7 +739,7 @@ def test_cursor_git_push_asks_without_phrase(
         "tool_input": {"command": "git push origin HEAD"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "ask"
 
@@ -786,7 +807,7 @@ def test_cursor_glab_write_asks_without_transcript(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "ask"
     assert "external-write.md" in out["user_message"]
@@ -799,14 +820,14 @@ def test_cursor_glab_write_asks_on_empty_transcript_path(
 ) -> None:
     """An empty transcript_path string must not read Path('.') as a file."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
-    assert gate_check.last_user_message("") == ""
+    assert gate_check.extract_latest_user_prompt("") == ""
     payload = {
         "session_id": "conv-1",
         "transcript_path": "",
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "ask"
 
@@ -825,7 +846,7 @@ def test_claude_glab_write_denies_without_transcript(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     decision = out["hookSpecificOutput"]["permissionDecision"]
     assert decision == "deny"
@@ -846,7 +867,7 @@ def test_cursor_deny_transcript_still_asks(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "ask"
 
@@ -866,7 +887,7 @@ def test_claude_deny_transcript_still_denies(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -876,7 +897,7 @@ def test_claude_deny_transcript_still_denies(
 def test_cursor_glab_with_approve_transcript_reaches_gate_once(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """A Cursor transcript with Approve skips ask and hits gate_once."""
+    """Approve in a Cursor transcript skips ask and reaches injection."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     transcript = _approve_transcript(tmp_path)
     payload = {
@@ -885,7 +906,7 @@ def test_cursor_glab_with_approve_transcript_reaches_gate_once(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
     assert "external write L2" in out["agent_message"]
@@ -895,7 +916,7 @@ def test_cursor_glab_with_approve_transcript_reaches_gate_once(
 def test_cursor_approve_second_call_allows(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """After Approve and the first gate_once deny, a retry is allowed."""
+    """After Approve and the first injection deny, a retry is allowed."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     transcript = _approve_transcript(tmp_path)
     payload = {
@@ -904,10 +925,10 @@ def test_cursor_approve_second_call_allows(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     capsys.readouterr()
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out == {"permission": "allow"}
 
@@ -915,7 +936,7 @@ def test_cursor_approve_second_call_allows(
 def test_claude_approve_second_call_allows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Claude Approve plus gate_once retry allows on the second call."""
+    """Claude Approve plus injection retry allows on the second call."""
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.claude/hooks/gate-check.py"
     )
@@ -927,10 +948,10 @@ def test_claude_approve_second_call_allows(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     capsys.readouterr()
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
@@ -955,7 +976,7 @@ def test_chinese_exec_phrase_authorizes_gate_once(
         "tool_input": {"command": "glab api --method POST projects/x/notes"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out["permission"] == "deny"
     assert "external write L2" in out["agent_message"]
@@ -972,7 +993,7 @@ def test_cursor_readonly_glab_allows_without_ask(
         "tool_input": {"command": "glab api projects/x"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios)
+        gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     assert out == {"permission": "allow"}
 
@@ -1029,14 +1050,22 @@ def test_cursor_mcp_marker_rejects_longer_token_prefix(
 
 def test_cursor_register_flags_bare_so_without_modal() -> None:
     """401(d)/(f): spaced 'so' is banned even when no modal follows."""
-    text = "# The hyphenated form is restored so path segments stay covered."
+    text = (
+        "# The hyphenated form is restored "
+        + "so"
+        + " path segments stay covered."
+    )
     violations = post_write_review.find_register_violations(text)
     assert any("bare escape-hatch 'so'" in v for v in violations)
 
 
 def test_cursor_register_flags_md_bare_so_no_modal() -> None:
     """Markdown prose gets the same spaced-'so' ban via the virtual prefix."""
-    text = "The hyphenated form is restored so path segments stay covered."
+    text = (
+        "The hyphenated form is restored "
+        + "so"
+        + " path segments stay covered."
+    )
     violations = post_write_review.find_register_violations(
         text, is_markdown=True
     )

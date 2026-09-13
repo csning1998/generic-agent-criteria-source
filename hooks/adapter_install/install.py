@@ -32,6 +32,7 @@ class AdapterSpec:
     source: str
     dest: str
     mode: str
+    scenario_id: str | None = None
 
 
 _STATIC_SPECS: tuple[AdapterSpec, ...] = (
@@ -61,6 +62,11 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
         mode=MODE_COPY,
     ),
     AdapterSpec(
+        source="hooks/adapters/claude/scenario_parser.py",
+        dest=".claude/hooks/scenario_parser.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
         source="hooks/adapters/claude/gate-check.py",
         dest=".cursor/hooks/gate-check.py",
         mode=MODE_COPY,
@@ -68,6 +74,11 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
     AdapterSpec(
         source="hooks/adapters/claude/post-write-review.py",
         dest=".cursor/hooks/post-write-review.py",
+        mode=MODE_COPY,
+    ),
+    AdapterSpec(
+        source="hooks/adapters/claude/scenario_parser.py",
+        dest=".cursor/hooks/scenario_parser.py",
         mode=MODE_COPY,
     ),
     AdapterSpec(
@@ -101,62 +112,62 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-md.md",
+        source="hooks/criteria/4_L2-trigger/markdown.md",
         dest=".claude/lang_md.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-hcl.md",
+        source="hooks/criteria/4_L2-trigger/hcl.md",
         dest=".claude/lang_hcl.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-ts.md",
+        source="hooks/criteria/4_L2-trigger/typescript.md",
         dest=".claude/lang_ts.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-ipynb.md",
+        source="hooks/criteria/4_L2-trigger/ipynb.md",
         dest=".claude/lang_ipynb.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-yaml.md",
+        source="hooks/criteria/4_L2-trigger/yaml.md",
         dest=".claude/lang_yaml.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-go.md",
+        source="hooks/criteria/4_L2-trigger/golang.md",
         dest=".claude/lang_go.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-md.md",
+        source="hooks/criteria/4_L2-trigger/markdown.md",
         dest=".gemini/lang_md.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-hcl.md",
+        source="hooks/criteria/4_L2-trigger/hcl.md",
         dest=".gemini/lang_hcl.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-ts.md",
+        source="hooks/criteria/4_L2-trigger/typescript.md",
         dest=".gemini/lang_ts.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-ipynb.md",
+        source="hooks/criteria/4_L2-trigger/ipynb.md",
         dest=".gemini/lang_ipynb.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-yaml.md",
+        source="hooks/criteria/4_L2-trigger/yaml.md",
         dest=".gemini/lang_yaml.md",
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
-        source="hooks/criteria/references/lang-go.md",
+        source="hooks/criteria/4_L2-trigger/golang.md",
         dest=".gemini/lang_go.md",
         mode=MODE_SYMLINK,
     ),
@@ -189,7 +200,7 @@ def infer_grok_root() -> Path:
 
 
 def _cursor_specs(grok_root: Path) -> tuple[AdapterSpec, ...]:
-    """Build Cursor `.mdc` specs from scenario `adapters.cursor`."""
+    """Load Cursor `.mdc` specs from the language dispatch table."""
     specs: list[AdapterSpec] = []
     for rel, parsed in iter_cursor_scenarios(grok_root):
         specs.append(
@@ -197,6 +208,7 @@ def _cursor_specs(grok_root: Path) -> tuple[AdapterSpec, ...]:
                 source=rel,
                 dest=f".cursor/rules/lang-{parsed.scenario_id}.mdc",
                 mode=MODE_CURSOR_MDC,
+                scenario_id=parsed.scenario_id,
             )
         )
     return tuple(specs)
@@ -237,6 +249,12 @@ def _validate_specs() -> None:
             "/"
         ):
             raise ValueError(f"copy dest is a directory {spec.dest}")
+        if spec.mode == MODE_CURSOR_MDC:
+            if not spec.scenario_id:
+                raise ValueError("cursor spec is missing scenario_id")
+            expected_dest = f".cursor/rules/lang-{spec.scenario_id}.mdc"
+            if spec.dest != expected_dest:
+                raise ValueError(f"cursor dest mismatch {spec.dest}")
 
 
 _validate_specs()
@@ -334,14 +352,18 @@ def _iter_files(root: Path) -> tuple[Path, ...]:
     return tuple(sorted(files))
 
 
-def expected_payload(source: Path, mode: str) -> bytes:
+def render_expected_payload(
+    source: Path, mode: str, *, scenario_id: str | None = None
+) -> bytes:
     """Return dest bytes for copy-like modes."""
     if mode == MODE_CURSOR_MDC:
-        return render_cursor_mdc(source)
+        if not scenario_id:
+            raise ValueError("cursor render is missing scenario_id")
+        return render_cursor_mdc(source, scenario_id=scenario_id)
     return _file_bytes(source)
 
 
-def trees_match(left: Path, right: Path) -> bool:
+def are_directory_trees_identical(left: Path, right: Path) -> bool:
     """Return True when both paths exist and hold the same file bytes."""
     if left.is_file() and right.is_file():
         return _file_bytes(left) == _file_bytes(right)
@@ -369,35 +391,52 @@ def _remove_replaceable_tree(dest: Path) -> None:
     dest.rmdir()
 
 
-def current_state(dest: Path, source: Path, mode: str) -> str:
-    """Return ok, missing, or a drift token for one dest."""
-    if not dest.exists() and not dest.is_symlink():
-        return "missing"
+def _inspect_symlink_state(dest: Path, source: Path) -> str:
+    """Evaluate drift when spec expects a symlink."""
     if dest.is_symlink():
-        if mode != MODE_SYMLINK:
-            return "symlink-for-copy"
         try:
-            if dest.resolve() == source.resolve():
-                return "ok"
+            return (
+                "ok" if dest.resolve() == source.resolve() else "wrong-symlink"
+            )
         except OSError:
             return "broken-symlink"
-        return "wrong-symlink"
-    if mode == MODE_SYMLINK:
-        if dest.is_file() or dest.is_dir():
-            if trees_match(dest, source):
-                return "regular-same"
-            return "regular-differs"
-        return "unexpected-type"
-    if mode in (MODE_COPY, MODE_CURSOR_MDC):
-        if dest.is_file() and source.is_file():
-            if _file_bytes(dest) == expected_payload(source, mode):
-                return "ok"
-            return "copy-differs"
-        return "unexpected-type"
+    if dest.is_file() or dest.is_dir():
+        return (
+            "regular-same"
+            if are_directory_trees_identical(dest, source)
+            else "regular-differs"
+        )
     return "unexpected-type"
 
 
-def check_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
+def _inspect_copy_state(
+    dest: Path, source: Path, mode: str, scenario_id: str | None
+) -> str:
+    """Evaluate drift when spec expects a copy or rendered mdc."""
+    if dest.is_symlink():
+        return "symlink-for-copy"
+    if dest.is_file() and source.is_file():
+        expected = render_expected_payload(
+            source, mode, scenario_id=scenario_id
+        )
+        return "ok" if _file_bytes(dest) == expected else "copy-differs"
+    return "unexpected-type"
+
+
+def inspect_dest_drift(
+    dest: Path, source: Path, mode: str, *, scenario_id: str | None = None
+) -> str:
+    """Return ok, missing, or a drift token for one dest."""
+    if not dest.exists() and not dest.is_symlink():
+        return "missing"
+    if mode == MODE_SYMLINK:
+        return _inspect_symlink_state(dest, source)
+    if mode in (MODE_COPY, MODE_CURSOR_MDC):
+        return _inspect_copy_state(dest, source, mode, scenario_id)
+    return "unexpected-type"
+
+
+def inspect_spec_drift(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     """Return ok or a drift token. missing source is source-missing."""
     source = resolve_source(grok_root, spec)
     dest = resolve_dest(home, spec)
@@ -405,7 +444,9 @@ def check_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "source-missing"
     if not _dest_parent_under_home(home, dest):
         return "dest-escapes"
-    state = current_state(dest, source, spec.mode)
+    state = inspect_dest_drift(
+        dest, source, spec.mode, scenario_id=spec.scenario_id
+    )
     if state == "ok":
         return "ok"
     return state
@@ -423,7 +464,7 @@ def _can_apply(state: str) -> bool:
     )
 
 
-def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
+def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     """Materializes a single specification destination.
 
     Returns the execution status token.
@@ -434,7 +475,9 @@ def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "source-missing"
     if not _dest_parent_under_home(home, dest):
         return "dest-escapes"
-    state = current_state(dest, source, spec.mode)
+    state = inspect_dest_drift(
+        dest, source, spec.mode, scenario_id=spec.scenario_id
+    )
     if state == "ok":
         return "skipped"
     if state == "regular-differs":
@@ -445,7 +488,9 @@ def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "dest-escapes"
     if not _dest_parent_under_home(home, dest):
         return "dest-escapes"
-    state = current_state(dest, source, spec.mode)
+    state = inspect_dest_drift(
+        dest, source, spec.mode, scenario_id=spec.scenario_id
+    )
     if state == "ok":
         return "skipped"
     if state == "regular-differs":
@@ -472,7 +517,11 @@ def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as handle:
-            handle.write(expected_payload(source, spec.mode))
+            handle.write(
+                render_expected_payload(
+                    source, spec.mode, scenario_id=spec.scenario_id
+                )
+            )
         if spec.mode == MODE_COPY and source.stat().st_mode & 0o111:
             tmp.chmod(tmp.stat().st_mode | 0o111)
         os.replace(tmp, dest)
@@ -482,11 +531,11 @@ def apply_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     return "applied"
 
 
-def run_check(grok_root: Path, home: Path) -> int:
+def execute_check(grok_root: Path, home: Path) -> int:
     """Print dest status. Return 1 when any dest is not ok."""
     failed = False
     for spec in SPECS:
-        status = check_spec(grok_root, home, spec)
+        status = inspect_spec_drift(grok_root, home, spec)
         if status == "ok":
             print(f"OK    {spec.dest}")
             continue
@@ -495,11 +544,11 @@ def run_check(grok_root: Path, home: Path) -> int:
     return 1 if failed else 0
 
 
-def run_apply(grok_root: Path, home: Path) -> int:
+def execute_apply(grok_root: Path, home: Path) -> int:
     """Refuse mismatched dests, then materialize. Return 1 on abort."""
     blocked: list[tuple[str, str]] = []
     for spec in SPECS:
-        status = check_spec(grok_root, home, spec)
+        status = inspect_spec_drift(grok_root, home, spec)
         if status == "ok":
             continue
         if status == "regular-differs":
@@ -516,7 +565,7 @@ def run_apply(grok_root: Path, home: Path) -> int:
         return 1
     failed = False
     for spec in SPECS:
-        result = apply_spec(grok_root, home, spec)
+        result = reconcile_spec(grok_root, home, spec)
         if result == "skipped":
             print(f"SKIP  {spec.dest}")
             continue
@@ -555,8 +604,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     home = args.home.resolve() if args.home else Path.home()
     if args.command == "apply":
-        return run_apply(grok_root, home)
-    return run_check(grok_root, home)
+        return execute_apply(grok_root, home)
+    return execute_check(grok_root, home)
 
 
 if __name__ == "__main__":

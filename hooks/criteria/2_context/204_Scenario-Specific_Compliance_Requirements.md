@@ -1,0 +1,9 @@
+# **§ 204. Scenario-Specific Compliance Requirements**
+
+- **(a) Criteria Source Tree**：Every tracked file in this repository MUST satisfy the clauses which apply to the path glob of the file. A clause file under `hooks/criteria/` is not exempt from § 305 or from `markdown.md`.
+- **(b) MR/PR Template Conformity**：All MR/PR descriptions MUST align strictly with the existing template of the target repository (for example, `merge_request_templates/default.md` for GitLab, or `pull_request_template.md` for GitHub).
+- **(c) MR/PR Prose Form**：An MR or PR Summary MUST follow § 305 paragraph cohesion and `markdown.md` prose fluency. Each paragraph MUST treat one topic. Each sentence MUST express one event.
+- **(d) Changes and Fixes Definitions**：The Changes section MUST describe only the net final-state difference between the end of the previous MR and the present submission. The Fixes section MUST record only defects inherited from the previous MR or defects which were already present prior to the current submission. Recording intermediate errors which were introduced on the current branch during development and already corrected on the current branch MUST NOT occur.
+- **(e) Ansible Task-Include Comments**：A code comment at an `include_tasks` call site MUST NOT exceed three lines. The code comment MUST state only the automation content and one non-obvious technical fact. The code comment MUST NOT repeat the task name.
+- **(f) Git Commit Messages**：A Git commit message title MUST follow Conventional Commits (Angular format), using the structure `type(scope): description`. Only a commit with the `chore` type MAY omit the scope. The commit message body MUST describe the final state resulting from the change. Debug-reply behavior MUST follow § 205.
+- **(g) Merge Request Review Comments**：Handling of merge request review comments MUST follow § 203.

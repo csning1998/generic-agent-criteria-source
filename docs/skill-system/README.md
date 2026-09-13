@@ -80,13 +80,13 @@ If the Notion API changes, only the Notion module changes. yt-dlp and Buzz modul
 
 If the owner later replaces Notion with a self-hosted API, only the write module changes. Layer fill tables stay.
 
-## Section 4. YouTube to Resources handoff
+## Section 4. Transcribe YouTube video to Notion Resources handoff
 
 Layer is one `skill-*` that sequences three modules.
 
 1. Layer fills yt-dlp input JSON (`url`, `mode`, `outdir`). Module returns JSON (`media_path`, `watch_url`, tags if present).
 2. Layer fills Buzz input JSON (`media_path`, `model_type`, `model_size`, `language`). Module returns JSON (`transcript_path`, `exit_code`).
-3. Layer creates `/tmp/skill-youtube-to-resources/<id>/` with mode `0700`, writes `VideoResourcePayload` there, and sends `payload_path` to the Notion module. The module reads that file. Agent MUST NOT paste Title, Description, or content into a tool call.
+3. Layer creates `/tmp/skill-transcribe-youtube-video-to-notion-resources/<id>/` with mode `0700`, writes `VideoResourcePayload` there, and sends `payload_path` to the Notion module. The module reads that file. Agent MUST NOT paste Title, Description, or content into a tool call.
 
 Do not paste a live title or transcript into a `SKILL.md`.
 

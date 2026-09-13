@@ -1,5 +1,5 @@
 @~/.agents/AGENTS.md
-@~/.agents/criteria/00-routing.md
+@~/.agents/criteria/README.md
 @~/.agents/ENGINEERING_PRINCIPLES.md
 
 The sections below belong to this file. They are not part of `AGENTS.md`.

@@ -1,0 +1,8 @@
+# **§ 111. Minimalist Reporting and Verification**
+
+§ 111 applies after a local execute act or an external execute act under § 106 has run. Dialogue length in planning replies follows § 301(a). Due diligence in planning replies follows § 104(d).
+
+- **(a) Minimalist Reporting**：Upon completion of an authorized execution act, reporting SHALL be restricted exclusively to the factual state of the operational result and the minimum data required for the subsequent step.
+- **(b) Verification Responsibility**：Unless explicitly exempted, any creation or modification of code MUST concurrently provide a deterministic verification mechanism (e.g., an automated test case or CLI command) to demonstrate functionality. Correctness MUST rely exclusively on reproducible factual evidence.
+- **(c) Inter-step Reporting**：During a multi-step execution sequence, inter-step status transmissions MUST be restricted to the outcome of the completed step and the identifier of the subsequent step. Constraints regarding planning length (§ 301(a)) and due diligence (§ 104(d)) MUST NOT apply to inter-step messaging.
+- **(d) Post-Edit Lint Execution**：Following any local execution act which modifies a file associated with a declared project linter, the designated linter MUST execute against the modified target before step completion is reported. Any lint failure detected during execution MUST be resolved within the same step and MUST NOT be deferred to subsequent executions. A lint failure MUST NOT be replaced by asking the owner whether to fix the lint failure. A rule-disable directive (`noqa`, `yamllint disable-line`, and equivalents) MUST NOT resolve a lint failure. The underlying content MUST change until the rule evaluates as passing without a suppression directive.

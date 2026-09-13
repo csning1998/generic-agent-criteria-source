@@ -37,17 +37,13 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-# Enable rule sets for Google Python Style Guide alignment
-# E, W: pycodestyle (PEP 8 basic styling)
-# F: pyflakes (static error detection)
-# I: isort (import sorting)
-# D: pydocstyle (docstring checks)
+# Rule selection: pycodestyle, pyflakes, isort, pydocstyle
 select = ["E", "W", "F", "I", "D"]
 
-# Ignore rules that are not strictly enforced
+# Ignored rules
 ignore = [
-  "D100", # Missing docstring in public module
-  "D104", # Missing docstring in public package
+  "D100",
+  "D104",
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -69,3 +65,12 @@ dev = ["ruff>=0.15.20", "pytest>=8"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.pyright]
+extraPaths = [
+  "hooks",
+  "hooks/adapters/claude",
+  "skills/skill-module-gitlab-mr-labels/scripts",
+  "skills/skill-update-antigravity/scripts",
+]
+

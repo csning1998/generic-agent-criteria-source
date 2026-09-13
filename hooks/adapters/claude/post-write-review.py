@@ -22,6 +22,9 @@ import re
 import sys
 from pathlib import Path
 
+from scenario_parser import find_most_specific_scenario
+from scenario_parser import load_scenarios_from_dir
+
 
 CRITERIA_DIR = Path.home() / ".agents" / "criteria"
 STATE_DIR: Path | None = None
@@ -39,8 +42,9 @@ BARE_THEM_PATTERN = re.compile(r"(?:#|//).*\bthem\b", re.IGNORECASE)
 # by 401(f). A determiner reading offers no exception here.
 OTHERWISE_PATTERN = re.compile(r"(?:#|//).*\botherwise\b", re.IGNORECASE)
 COMMA_SO_PATTERN = re.compile(r"^\s*(?:#|//).*,\s*so\b", re.IGNORECASE)
-# Spaced causal 'so' (including non-modal shapes such as "restored so path").
-# Hyphenated forms such as "so-called" stay outside this pattern.
+# Spaced causal connector. Non-modal shapes such as a restored path after
+# the connector match. Hyphenated forms such as "so-called" stay outside
+# this pattern.
 BARE_SO_PATTERN = re.compile(
     r"(?:#|//).*\s+so\s+",
     re.IGNORECASE,
@@ -143,101 +147,13 @@ DEFENSIVE_ANALOGY_PATTERN = re.compile(
     r"\b(?:exactly like|just as with|just like)\b", re.IGNORECASE
 )
 
-ARRAY_KEYS = (
-    "path_glob",
-    "command_prefix",
-    "readonly_command_glob",
-    "command_glob",
-)
-
-
-def parse_frontmatter(path: Path) -> dict:
-    """Parse the YAML-flow-style arrays used by hooks/criteria/*.md."""
-    text = path.read_text(encoding="utf-8")
-    if not text.startswith("---"):
-        return {}
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}
-    block = text[3:end]
-    data: dict = {
-        "load": [],
-        "path_glob": [],
-        "command_glob": [],
-        "command_prefix": [],
-        "readonly_command_glob": [],
-    }
-    section = None
-    for line in block.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("id:"):
-            data["id"] = stripped.split(":", 1)[1].strip()
-            section = None
-            continue
-        if stripped == "load:":
-            section = "load"
-            continue
-        matched_key = next(
-            (k for k in ARRAY_KEYS if stripped.startswith(k + ":")), None
-        )
-        if matched_key is not None:
-            rest = stripped[len(matched_key) + 1 :].strip()
-            data[matched_key] = re.findall(r'"([^"]+)"', rest)
-            section = None if rest.endswith("]") else matched_key
-            continue
-        if stripped.startswith("- ") and section == "load":
-            data["load"].append(stripped[2:].strip())
-            continue
-        if section in ARRAY_KEYS:
-            data[section].extend(re.findall(r'"([^"]+)"', stripped))
-            if stripped.endswith("]"):
-                section = None
-            continue
-        if re.match(r"^[a-zA-Z_]+:", stripped):
-            section = None
-    return data
-
 
 def load_scenarios() -> list[dict]:
     """Load the frontmatter of every criteria scenario under CRITERIA_DIR."""
-    if not CRITERIA_DIR.is_dir():
-        return []
-    scenarios = []
-    for path in sorted(CRITERIA_DIR.glob("*.md")):
-        meta = parse_frontmatter(path)
-        if meta.get("id"):
-            scenarios.append(meta)
-    return scenarios
+    return load_scenarios_from_dir(CRITERIA_DIR)
 
 
-def _path_glob_specificity(pattern: str) -> int:
-    """Score a path_glob pattern by its literal character count."""
-    return sum(1 for char in pattern if char not in "*?")
-
-
-def match_path(scenarios: list[dict], file_path: str) -> dict | None:
-    """Return the scenario whose path_glob best matches the file name.
-
-    When several scenarios match, the highest specificity score wins.
-    A literal `merge-request.md` therefore beats a broad `*.md`.
-    """
-    name = Path(file_path).name
-    best: dict | None = None
-    best_score = -10_000
-    for meta in scenarios:
-        for pattern in meta.get("path_glob", []):
-            if not fnmatch.fnmatch(name, pattern):
-                continue
-            score = _path_glob_specificity(pattern)
-            if score > best_score:
-                best_score = score
-                best = meta
-    return best
-
-
-def resolve_load_text(meta: dict) -> str:
+def render_scenario_bundle_text(meta: dict) -> str:
     """Concatenate the referenced text of every file in the load list."""
     parts = []
     for rel in meta.get("load", []):
@@ -248,27 +164,31 @@ def resolve_load_text(meta: dict) -> str:
     return "\n\n".join(parts)
 
 
-def cursor_protocol() -> bool:
+def is_cursor_runtime() -> bool:
     """Return True when this file lives under a Cursor hooks directory."""
     return "/.cursor/" in Path(__file__).resolve().as_posix()
 
 
-def state_dir() -> Path:
+def resolve_state_directory() -> Path:
     """Return the session state root for this materialized adapter."""
     if STATE_DIR is not None:
         return STATE_DIR
-    label = "cursor" if cursor_protocol() else "claude"
+    label = "cursor" if is_cursor_runtime() else "claude"
     return Path(f"/tmp/{label}-gate-state-{os.getuid()}")
 
 
-def marker(session_id: str, scenario_id: str) -> Path:
+def resolve_marker_path(session_id: str, scenario_id: str) -> Path:
     """Return the state-marker path for session_id and scenario_id."""
-    return state_dir() / session_id / f"{STATE_PREFIX}__{scenario_id}"
+    return (
+        resolve_state_directory()
+        / session_id
+        / f"{STATE_PREFIX}__{scenario_id}"
+    )
 
 
-def already_surfaced(session_id: str, scenario_id: str) -> bool:
+def is_scenario_surfaced(session_id: str, scenario_id: str) -> bool:
     """Return whether scenario_id was already surfaced for the given session."""
-    return marker(session_id, scenario_id).exists()
+    return resolve_marker_path(session_id, scenario_id).exists()
 
 
 def _ensure_private_dir(path: Path) -> None:
@@ -283,12 +203,14 @@ def _ensure_private_dir(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
-def mark_surfaced(session_id: str, scenario_id: str) -> None:
+def record_surfaced_scenario(session_id: str, scenario_id: str) -> None:
     """Record scenario_id as surfaced for session_id."""
-    root = state_dir()
+    root = resolve_state_directory()
     _ensure_private_dir(root)
     _ensure_private_dir(root / session_id)
-    marker(session_id, scenario_id).touch(mode=0o600, exist_ok=True)
+    resolve_marker_path(session_id, scenario_id).touch(
+        mode=0o600, exist_ok=True
+    )
 
 
 def claim_emit_slot(fingerprint: Path) -> bool:
@@ -318,13 +240,13 @@ def emit(additional_context: str, session_id: str = "unknown") -> None:
     re-fires lose on the exclusive fingerprint create and print nothing.
     """
     digest = hashlib.sha256(additional_context.encode("utf-8")).hexdigest()[:16]
-    root = state_dir()
+    root = resolve_state_directory()
     _ensure_private_dir(root)
     _ensure_private_dir(root / session_id)
     fingerprint = root / session_id / f"emit__{digest}"
     if not claim_emit_slot(fingerprint):
         return
-    if cursor_protocol():
+    if is_cursor_runtime():
         print(json.dumps({"additional_context": additional_context}))
         return
     payload = {
@@ -467,8 +389,8 @@ def _iter_scannable_lines(lines: list[str], is_markdown: bool):
     """Yield (line, stripped) pairs for the register checks to run.
 
     Skips markdown frontmatter and fenced code, and prefixes a bare
-    prose line with a virtual "# " so the comment-anchored patterns
-    above apply to markdown text the same way they apply to a comment.
+    prose line with a virtual "# ". Comment-anchored patterns then
+    apply to markdown text the same way they apply to a comment.
     """
     in_fence = False
     in_frontmatter = is_markdown and lines[:1] == ["---"]
@@ -509,7 +431,9 @@ class _CommentBlockTracker:
         self._words = []
         self._which_that_flagged = False
 
-    def observe(self, comment_body: str, stripped: str) -> list[str]:
+    def observe(
+        self, comment_body: str, stripped: str, is_markdown: bool = False
+    ) -> list[str]:
         """Fold one more comment line into the block and return findings."""
         violations: list[str] = []
         self._words.append(comment_body.strip())
@@ -530,7 +454,7 @@ class _CommentBlockTracker:
                 f"{block_text!r}"
             )
             self._which_that_flagged = True
-        if len(self._words) == MAX_COMMENT_BLOCK_LINES + 1:
+        if not is_markdown and len(self._words) == MAX_COMMENT_BLOCK_LINES + 1:
             violations.append(
                 f"[{VIOLATION}] comment block exceeds "
                 f"{MAX_COMMENT_BLOCK_LINES} lines, starting near: "
@@ -565,7 +489,9 @@ def find_register_violations(text: str, is_markdown: bool = False) -> list[str]:
             violations.extend(
                 _find_comment_body_violations(comment_body, stripped)
             )
-            violations.extend(block.observe(comment_body, stripped))
+            violations.extend(
+                block.observe(comment_body, stripped, is_markdown=is_markdown)
+            )
         else:
             block.reset()
     return violations
@@ -593,7 +519,7 @@ def _render_register_message(violations: list[str]) -> str:
     return "\n\n".join(sections)
 
 
-def write_text_for_register(file_path: str, tool_input: dict) -> str:
+def extract_register_target_text(file_path: str, tool_input: dict) -> str:
     """Return text for the register scan.
 
     Prefer bytes already on disk at ``file_path``. Fall back to the tool
@@ -624,14 +550,15 @@ def main() -> None:
         fnmatch.fnmatch(Path(file_path).name, g) for g in MARKDOWN_GLOBS
     )
     violations = find_register_violations(
-        write_text_for_register(file_path, tool_input), is_markdown=is_markdown
+        extract_register_target_text(file_path, tool_input),
+        is_markdown=is_markdown,
     )
     if violations:
         emit(_render_register_message(violations), session_id=session_id)
         return
 
     scenarios = load_scenarios()
-    meta = match_path(scenarios, file_path)
+    meta = find_most_specific_scenario(scenarios, file_path)
     if meta is None:
         meta = next(
             (m for m in scenarios if m.get("id") == "local-mutate"), None
@@ -642,9 +569,9 @@ def main() -> None:
     scenario_id = meta["id"]
     file_name = Path(file_path).name
 
-    if not already_surfaced(session_id, scenario_id):
-        mark_surfaced(session_id, scenario_id)
-        rules = resolve_load_text(meta)
+    if not is_scenario_surfaced(session_id, scenario_id):
+        record_surfaced_scenario(session_id, scenario_id)
+        rules = render_scenario_bundle_text(meta)
         emit(
             f"Post-write self-review ({scenario_id} scenario) for "
             f"{file_name}. Re-read the rules below against the file you "

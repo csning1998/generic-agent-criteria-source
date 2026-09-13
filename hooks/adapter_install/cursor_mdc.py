@@ -95,26 +95,93 @@ def parse_cursor_scenario(text: str) -> CursorScenario | None:
     )
 
 
+def parse_languages_scenarios(text: str) -> list[CursorScenario]:
+    """Parse Cursor scenarios from languages.md entries."""
+    raw = frontmatter(text)
+    if raw is None or "entries:" not in raw:
+        return []
+    entries: list[CursorScenario] = []
+    current_id: str | None = None
+    current_globs: str | None = None
+    current_load: list[str] = []
+    in_load = False
+
+    def _flush():
+        nonlocal current_id, current_globs, current_load, in_load
+        if current_id and current_globs and current_load:
+            entries.append(
+                CursorScenario(
+                    scenario_id=current_id,
+                    globs=current_globs,
+                    load=tuple(current_load),
+                )
+            )
+        current_id = None
+        current_globs = None
+        current_load = []
+        in_load = False
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- id:"):
+            _flush()
+            current_id = stripped.split(":", 1)[1].strip()
+            continue
+        if stripped.startswith("cursor_globs:"):
+            m = re.search(r'"([^"]+)"', stripped)
+            if m:
+                current_globs = m.group(1)
+            continue
+        if stripped == "load:":
+            in_load = True
+            continue
+        if in_load and stripped.startswith("- "):
+            current_load.append(stripped[2:].strip())
+            continue
+        if _KEY_LINE.match(stripped) and not stripped.startswith("- "):
+            in_load = False
+
+    _flush()
+    return entries
+
+
+LANGUAGES_REL = "hooks/criteria/2_context/scenarios/languages.md"
+
+
 def iter_cursor_scenarios(
     grok_root: Path,
 ) -> tuple[tuple[str, CursorScenario], ...]:
-    """Yield relative source path and parsed fields for each Cursor scenario."""
-    criteria = grok_root / "hooks" / "criteria"
-    rows: list[tuple[str, CursorScenario]] = []
-    for path in sorted(criteria.glob("*.md")):
-        parsed = parse_cursor_scenario(path.read_text(encoding="utf-8"))
-        if parsed is None:
-            continue
-        rel = path.relative_to(grok_root).as_posix()
-        rows.append((rel, parsed))
-    return tuple(rows)
+    """Load Cursor fields from the language dispatch table only."""
+    path = grok_root.joinpath(*Path(LANGUAGES_REL).parts)
+    if not path.is_file():
+        raise ValueError(f"missing language dispatch table {LANGUAGES_REL}")
+    parsed_rows = parse_languages_scenarios(path.read_text(encoding="utf-8"))
+    if not parsed_rows:
+        raise ValueError(f"no cursor entries in {LANGUAGES_REL}")
+    return tuple((LANGUAGES_REL, parsed) for parsed in parsed_rows)
 
 
-def render_cursor_mdc(scenario_path: Path) -> bytes:
+def render_cursor_mdc(scenario_path: Path, scenario_id: str) -> bytes:
     """Return thin `.mdc` bytes. L2 bodies stay in references/."""
-    parsed = parse_cursor_scenario(scenario_path.read_text(encoding="utf-8"))
+    if not scenario_id:
+        raise ValueError("cursor render is missing scenario_id")
+    if scenario_path.name != "languages.md":
+        raise ValueError(
+            f"cursor render requires languages.md, got {scenario_path}"
+        )
+    parsed: CursorScenario | None = None
+    for candidate in parse_languages_scenarios(
+        scenario_path.read_text(encoding="utf-8")
+    ):
+        if candidate.scenario_id == scenario_id:
+            parsed = candidate
+            break
     if parsed is None:
-        raise ValueError(f"no cursor adapter in {scenario_path}")
+        raise ValueError(
+            f"no cursor adapter in {scenario_path} (scenario_id={scenario_id})"
+        )
     lines = [
         "---",
         f"description: {parsed.scenario_id} L2 criteria",

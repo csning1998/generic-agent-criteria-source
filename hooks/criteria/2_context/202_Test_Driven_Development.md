@@ -1,0 +1,9 @@
+# **§ 202. Test Driven Development**
+
+§ 202 applies when the owner or project documentation declares the repository a TDD repository. § 202 covers production and test mutation in Python, TypeScript, Go, HCL, and YAML trees which the declaration covers.
+
+- **(a) Failing Test Prerequisite**：Prior to any write of production code which is intended to satisfy an automated test, the system MUST write an automated test. The system MUST execute the automated test. The automated test MUST fail for a reason which demonstrates the missing behavior.
+- **(b) Red Result Presentation**：The failing test result MUST be presented to the owner before any production code write which targets the same behavior. The system MUST NOT write production code for that behavior until the owner has reviewed the failing result and has explicitly authorized progress into the green step.
+- **(c) Pre Presentation Lint**：Prior to presentation of a failing test result, every project linter which applies to a test file modified in the same step MUST pass. A lint failure MUST be resolved in the same step. Presentation of the failing test result MUST NOT occur while a lint failure remains.
+- **(d) Post Authorization Verification**：After the owner authorizes progress into the green step, the system MUST re execute the minimal automated test set which covers the change. The system MUST re execute every applicable project linter in the same turn. Reporting MUST follow § 111.
+- **(e) Hygiene and Authorization**：Hygiene work which the repository already declares（linter repair, formatter repair, and equivalent local verification repair）MUST be completed by the system. Asking the owner whether to perform that hygiene work MUST NOT replace completion of the hygiene work. A mutation outside the authorized duty MUST NOT proceed. The system MAY ask a clarifying question. The system MUST NOT begin a mutation until the owner has given explicit authorization for that mutation.

@@ -1,39 +1,39 @@
 # Collaboration Principles
 
-本檔為跨專案常駐規範。只寫不隨產品改變的協作規則。技術棧細節在 `~/.grok/hooks/principles/`，僅在當次工作需要該棧時讀取。
+This document defines resident, cross-project collaboration rules that remain invariant across products. Technology-stack architecture principles reside in `~/.agents/criteria/2_context/domain/` and MUST be loaded only when the current task requires that stack.
 
 ## Section 1. Read Adjudication First
 
-改已被 `planning/architecture_倉名*.md` 涵蓋的 `terraform/`、`ansible/`、`packer/`，或改 `planning/` 本身之前，必須先讀 `planning/decisions.md` 與至少一份對應的 `architecture*.md`。讀完之後寫出搬移、命名、DAG、當次範圍。未出現在檔名中的倉不套用此條。
+Before modifying `terraform/`, `ansible/`, or `packer/` directories governed by `planning/architecture_<repo_name>*.md`, or before modifying `planning/` itself, the system MUST inspect `planning/decisions.md` and at least one corresponding `architecture*.md` specification. Following that inspection, the system MUST record migrations, identifier naming, the directed acyclic graph (DAG), and the current scope in writing. Repositories not referenced in architecture filenames are exempt from this requirement.
 
-未讀就動手，會把未裁決的命名與依賴寫進共用路徑。
+Modifying files prior to inspection introduces unadjudicated naming conventions and dependency cycles into shared paths.
 
 ## Section 2. Shared Modules Stay Generic
 
-共用模組（`terraform/modules/`、`ansible/roles/utils_*`）只宣告資源結構。環境別名與產品名由呼叫端傳入。未在提示寫 `leave generic module` 不得改共用模組。
+Shared modules (`terraform/modules/`, `ansible/roles/utils_*`) MUST declare only resource structures. Environment aliases and product identifiers MUST be passed in by callers. Modifying a shared module is prohibited unless the prompt contains the explicit execution phrase `leave generic module`.
 
-為單一呼叫端改共用模組，會把業務判斷擴散到所有呼叫端。
+Modifying a shared module for a single caller spreads business logic across all consuming callers.
 
 ## Section 3. One Owner Mints Secrets
 
-任一 Secret 只允許一個 Owner 負責 Generate。其餘層只許參照。消費層不得宣告 `random_password`，也不得呼叫 mint 模組。
+Every secret MUST have exactly one designated owner responsible for generation. Dependent layers MUST only reference the generated secret. A consumer layer MUST NOT declare `random_password` and MUST NOT invoke a minting module.
 
-消費層自己 mint，重建暫態層會弄丟持久資料的唯一密鑰。
+Generating secrets within a consumer layer causes loss of the sole decryption key for durable data when transient layers are rebuilt.
 
-## Section 4. Repair Declarations, Not Guests
+## Section 4. Repair Declarations at the Source
 
-宣告與現實不一致時，改宣告源頭，或 Assert 後停下。禁止把 `psql`、`ALTER USER`、`local-exec` 寫進 play、Terraform、Packer、腳本、Makefile 或 CI 當修補步驟。guest 上的唯讀偵錯不在 hook 閘內。用 guest SQL 改密碼或清 dirty 來蓋掉宣告漂移，下一次套用會再漂。該類命令需要當次 owner 片語 `allow guest sql`，且仍不得寫進檔案。
+When reality drifts from declarations, the system MUST modify the declaration source or MUST halt after an assertion failure. Introducing `psql`, `ALTER USER`, or `local-exec` into plays, Terraform configurations, Packer templates, standalone scripts, Makefiles, or CI pipelines as remediation steps is strictly prohibited. Read-only debugging on guest systems remains outside the hook gate. Modifying passwords or clearing dirty states using guest SQL masks declarative drift, causing repeated drift during subsequent deployments. Such commands require the turn-specific authorization phrase `allow guest sql` from the owner and MUST NOT be written to disk files.
 
 ## Section 5. Stay In Scope
 
-當次只做指定範圍。範圍外的問題用文字回報，不得順手修改。
+Execution MUST be confined strictly to the designated scope. Defects identified outside the designated scope MUST be reported in dialogue text without modifying out-of-scope files.
 
-範圍外修改會讓審查無法對齊當次裁決。
+Modifications outside the assigned scope prevent verification from aligning with the active adjudication.
 
 ## Section 6. Verify Before Stating Versions
 
-版本、預設值、旗標、棄用狀態先查官方來源。查不到就聲明缺乏資訊並停在該點。
+Version numbers, default values, command-line flags, and deprecation states MUST be verified against official documentation prior to citation. When verifiable sources are absent, the system MUST declare insufficient information and MUST halt at that point.
 
-以記憶陳述版本會寫出已失效的旗標與預設值。
+Citing versions from unverified memory outputs invalid flags and obsolete defaults.
 
-Hook 只擋 Section 1 到 4 中可靜態判斷的動作。改共用模組請在提示寫 `leave generic module`。關閉 hook 請設 `ENGINEERING_PRINCIPLES_HOOK=0`。
+The PreToolUse hook blocks only statically verifiable actions defined in Section 1 through Section 4. Modifying shared modules requires the phrase `leave generic module` in the prompt. Disabling the hook requires setting `ENGINEERING_PRINCIPLES_HOOK=0`.

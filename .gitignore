@@ -37,6 +37,8 @@ hooks/state
 /docs/*
 !/docs/.markdownlint.json
 !/docs/.mdlrc
+!/docs/coding-standards/
+!/docs/coding-standards/**
 !/docs/second-brain/
 !/docs/second-brain/**
 !/docs/skill-system/

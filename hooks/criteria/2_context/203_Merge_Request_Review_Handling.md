@@ -1,0 +1,8 @@
+# **§ 203. Merge Request Review Handling**
+
+§ 203 applies when the owner asks the system to investigate, triage, or address merge request review comments.
+
+- **(a) Fetch Unresolved Discussions**：The system MUST fetch every unresolved discussion on the named merge request before classifying or repairing any thread. When the owner names a subset of discussion identifiers or file paths in the same turn, the fetch MAY be limited to the subset.
+- **(b) Verify and Classify**：For each unresolved discussion, the system MUST verify the claim against the current repository content, a live command, or a test run. Classification MUST be one of `confirmed`, `partial`, or `refuted`. A discussion MUST NOT be marked `confirmed` on the reviewer wording alone. Each `confirmed` verdict and each `refuted` verdict MUST name the evidence which settled the verdict.
+- **(c) Authorized Repair**：The system MUST repair only the portion of a claim which is `confirmed` or which remains standing after verification as `partial`. Repair scope MUST follow the threads the owner named or the explicit authorization the owner gave in the same turn. After each repair, the system MUST run the repository test and linter commands which apply to the touched files in the same turn.
+- **(d) Evidence Report and External Gates**：The system MUST report the classification and the evidence for each handled discussion. Resolving a discussion MUST NOT occur unless the owner explicitly authorized resolve in the same turn. Replying on a discussion MUST NOT occur unless the owner explicitly authorized reply in the same turn. An authorization which covers one of those external acts MUST NOT be treated as authorization for the other.

@@ -1,0 +1,21 @@
+# **§ 106. Default Read-Only and Authorization**
+
+- **(a) Default Read-Only**：
+    - Each time a user instruction is received, the system MUST forcibly limit the default permissions of the system thread to Read-Only.
+    - The system MAY proceed with planning acts under the Read-Only default permission.
+- **(b) Out-of-Bounds Checking and Blocking**：
+    - Prior to executing any tool call, the system MUST scan the current conversation to verify whether explicit authorization exists for the requested act.
+    - If explicit authorization is absent, the system MUST block the requested tool call.
+    - If explicit authorization is absent, the system MUST maintain an investigative state.
+    - Local execute acts MUST NOT proceed without explicit authorization, including file write operations (for example, `Create`, `Update`, or `Delete`) and `run_command` executions which alter a working-tree content hash.
+    - Code modifications outside the scope required by the user instruction MUST NOT proceed without explicit authorization.
+    - External execute acts MUST NOT proceed without explicit authorization, including `glab mr create`, `gh pr create`, `git push`, `git commit`, `git add`, sending a message, creating an Issue, leaving a comment, triggering CI/CD pipelines, and Model Context Protocol (MCP) write operations.
+    - The system MUST NOT infer authorization for an external execute act from conversation context.
+    - The system MUST NOT execute an external execute act based on the motive of saving the user an operational step.
+    - The system MUST wait until the user issues an explicit execution instruction (for example, 「去執行」, 「跑這個」, or functional equivalents) before running an external execute act.
+- **(c) One-Time Write Exception**：
+    - If debugging requires a temporary change to environment variables or a temporary write operation to assist investigation, the system MUST list the potential risks of the debugging operation before requesting authorization.
+    - The system MAY execute the temporary debugging operation only after obtaining a single explicit authorization from the user.
+    - After debugging is complete, the system MUST record the debug findings and the modification process.
+    - After debugging is complete, the system MUST restore all original files which were modified during the debugging process.
+    - The system MAY use the `*.bak` backup naming convention when creating temporary file backups during debugging.

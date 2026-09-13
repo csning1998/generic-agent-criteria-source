@@ -3,7 +3,7 @@
 
 Denies a matching Edit/Write/Bash call once per session and surfaces the
 routed scenario's `load:` files as additionalContext, per
-hooks/criteria/00-routing.md Section 2. A retry of the same scenario within
+hooks/criteria/README.md Section 2. A retry of the same scenario within
 the session passes through.
 """
 
@@ -12,11 +12,22 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import NoReturn
 
+from scenario_parser import find_most_specific_scenario
+from scenario_parser import load_scenarios_from_dir
+from scenario_parser import parse_frontmatter
+from scenario_parser import parse_languages_entries
+
+
+__all__ = [
+    "find_most_specific_scenario",
+    "load_scenarios",
+    "parse_frontmatter",
+    "parse_languages_entries",
+]
 
 CRITERIA_DIR = Path.home() / ".agents" / "criteria"
 STATE_DIR: Path | None = None
@@ -51,112 +62,15 @@ CURSOR_MCP_WRITE_MARKERS = (
     "accept_merge_request",
 )
 
-ARRAY_KEYS = (
-    "path_glob",
-    "command_prefix",
-    "readonly_command_glob",
-    "command_glob",
-)
-
-
-def parse_frontmatter(path: Path) -> dict:
-    """Parse the YAML-flow-style arrays used by hooks/criteria/*.md.
-
-    Handles both single-line (`key: ["a", "b"]`) and multi-line
-    (`key:` then `[` then one quoted item per line then `]`) forms,
-    since criteria files use either depending on line length.
-    """
-    text = path.read_text(encoding="utf-8")
-    if not text.startswith("---"):
-        return {}
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}
-    block = text[3:end]
-    data: dict = {
-        "load": [],
-        "path_glob": [],
-        "command_glob": [],
-        "command_prefix": [],
-        "readonly_command_glob": [],
-    }
-    section = None
-    for line in block.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("id:"):
-            data["id"] = stripped.split(":", 1)[1].strip()
-            section = None
-            continue
-        if stripped == "load:":
-            section = "load"
-            continue
-        matched_key = next(
-            (k for k in ARRAY_KEYS if stripped.startswith(k + ":")), None
-        )
-        if matched_key is not None:
-            rest = stripped[len(matched_key) + 1 :].strip()
-            data[matched_key] = re.findall(r'"([^"]+)"', rest)
-            section = None if rest.endswith("]") else matched_key
-            continue
-        if stripped.startswith("- ") and section == "load":
-            data["load"].append(stripped[2:].strip())
-            continue
-        if section in ARRAY_KEYS:
-            data[section].extend(re.findall(r'"([^"]+)"', stripped))
-            if stripped.endswith("]"):
-                section = None
-            continue
-        if re.match(r"^[a-zA-Z_]+:", stripped):
-            section = None
-    if section in ARRAY_KEYS:
-        print(
-            f"gate-check.py: WARNING: {path} has an unclosed '{section}' "
-            "array (no closing ']' found); whitelist entries may be missing.",
-            file=sys.stderr,
-        )
-    return data
-
 
 def load_scenarios() -> list[dict]:
     """Load every criteria scenario's frontmatter under CRITERIA_DIR."""
-    if not CRITERIA_DIR.is_dir():
-        return []
-    scenarios = []
-    for path in sorted(CRITERIA_DIR.glob("*.md")):
-        meta = parse_frontmatter(path)
-        if meta.get("id"):
-            scenarios.append(meta)
-    return scenarios
+    return load_scenarios_from_dir(CRITERIA_DIR)
 
 
-def _path_glob_specificity(pattern: str) -> int:
-    """Score a path_glob pattern by its literal character count."""
-    return sum(1 for char in pattern if char not in "*?")
-
-
-def match_path(scenarios: list[dict], file_path: str) -> dict | None:
-    """Return the scenario whose path_glob best matches file_path's name.
-
-    When several scenarios match, the highest specificity score wins.
-    A literal `merge-request.md` therefore beats a broad `*.md`.
-    """
-    name = Path(file_path).name
-    best: dict | None = None
-    best_score = -10_000
-    for meta in scenarios:
-        for pattern in meta.get("path_glob", []):
-            if not fnmatch.fnmatch(name, pattern):
-                continue
-            score = _path_glob_specificity(pattern)
-            if score > best_score:
-                best_score = score
-                best = meta
-    return best
-
-
-def match_command(scenarios: list[dict], command: str) -> dict | None:
+def find_matching_command_scenario(
+    scenarios: list[dict], command: str
+) -> dict | None:
     """Return the first scenario whose command_glob matches command."""
     for meta in scenarios:
         for pattern in meta.get("command_glob", []):
@@ -165,7 +79,7 @@ def match_command(scenarios: list[dict], command: str) -> dict | None:
     return None
 
 
-def resolve_load_text(meta: dict) -> str:
+def render_scenario_bundle_text(meta: dict) -> str:
     """Concatenate the referenced text of every file in meta's load list."""
     parts = []
     for rel in meta.get("load", []):
@@ -177,33 +91,33 @@ def resolve_load_text(meta: dict) -> str:
     return "\n\n".join(parts)
 
 
-def state_dir() -> Path:
+def resolve_state_directory() -> Path:
     """Return the session marker tree for this materialized adapter."""
     if STATE_DIR is not None:
         return STATE_DIR
-    label = "cursor" if cursor_protocol() else "claude"
+    label = "cursor" if is_cursor_runtime() else "claude"
     return Path(f"/tmp/{label}-gate-state-{os.getuid()}")
 
 
-def marker(session_id: str, scenario_id: str) -> Path:
+def resolve_marker_path(session_id: str, scenario_id: str) -> Path:
     """Return the session-scoped gate-state marker path for a scenario."""
-    return state_dir() / session_id / scenario_id
+    return resolve_state_directory() / session_id / scenario_id
 
 
-def already_surfaced(session_id: str, scenario_id: str) -> bool:
+def is_scenario_surfaced(session_id: str, scenario_id: str) -> bool:
     """Return whether scenario_id has already been surfaced this session."""
-    return marker(session_id, scenario_id).exists()
+    return resolve_marker_path(session_id, scenario_id).exists()
 
 
-def mark_surfaced(session_id: str, scenario_id: str) -> None:
+def record_surfaced_scenario(session_id: str, scenario_id: str) -> None:
     """Record that scenario_id has been surfaced this session."""
-    path = marker(session_id, scenario_id)
+    path = resolve_marker_path(session_id, scenario_id)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(path.parent, 0o700)
     path.touch(mode=0o600, exist_ok=True)
 
 
-def last_user_message(transcript_path: str) -> str:
+def extract_latest_user_prompt(transcript_path: str) -> str:
     """Extract and aggregate all user-attributable text within the turn."""
     if not transcript_path:
         return ""
@@ -250,14 +164,14 @@ def _block_text(block) -> str:
     return block.get("text", "")
 
 
-def cursor_protocol() -> bool:
+def is_cursor_runtime() -> bool:
     """Return True when this file lives under a Cursor hooks directory."""
     return "/.cursor/" in Path(__file__).resolve().as_posix()
 
 
 def deny(reason: str, additional_context: str | None = None) -> NoReturn:
     """Emit a PreToolUse deny decision and exit."""
-    if cursor_protocol():
+    if is_cursor_runtime():
         message = reason
         if additional_context:
             message = reason + "\n\n" + additional_context
@@ -286,7 +200,7 @@ def deny(reason: str, additional_context: str | None = None) -> NoReturn:
 
 def allow() -> NoReturn:
     """Emit a PreToolUse allow decision and exit."""
-    if cursor_protocol():
+    if is_cursor_runtime():
         print(json.dumps({"permission": "allow"}))
         sys.exit(0)
     payload = {
@@ -342,7 +256,7 @@ def _tool_name_has_marker(lowered: str, marker: str) -> bool:
 
 def is_cursor_mcp_external_write(tool_name: str) -> bool:
     """Return True for Cursor MCP tools which mutate GitLab or GitHub state."""
-    if not cursor_protocol():
+    if not is_cursor_runtime():
         return False
     lowered = tool_name.lower()
     return any(
@@ -351,19 +265,19 @@ def is_cursor_mcp_external_write(tool_name: str) -> bool:
     )
 
 
-def gate_once(session_id: str, meta: dict) -> None:
+def enforce_scenario_context_injection(session_id: str, meta: dict) -> None:
     """Allow a scenario's 2nd call this session; deny and surface the 1st."""
-    if already_surfaced(session_id, meta["id"]):
+    if is_scenario_surfaced(session_id, meta["id"]):
         allow()
-    mark_surfaced(session_id, meta["id"])
+    record_surfaced_scenario(session_id, meta["id"])
     deny(
-        f"Routed scenario '{meta['id']}' per 00-routing.md Section 2; "
+        f"Routed scenario '{meta['id']}' per README.md Section 2; "
         "content surfaced below, retry the same call now.",
-        resolve_load_text(meta),
+        render_scenario_bundle_text(meta),
     )
 
 
-def handle_edit_write(payload: dict, scenarios: list[dict]) -> None:
+def intercept_edit_write(payload: dict, scenarios: list[dict]) -> None:
     """Gate an Edit/Write tool call against path_glob-routed scenarios."""
     session_id = payload.get("session_id", "unknown")
     tool_input = payload.get("tool_input", {})
@@ -373,7 +287,7 @@ def handle_edit_write(payload: dict, scenarios: list[dict]) -> None:
             "notebook.md: disk mutation of .ipynb is prohibited in every case; "
             "use Literature Programming in-session instead."
         )
-    meta = match_path(scenarios, file_path)
+    meta = find_most_specific_scenario(scenarios, file_path)
     if meta is None:
         meta = next(
             (m for m in scenarios if m.get("id") == "local-mutate"), None
@@ -381,19 +295,19 @@ def handle_edit_write(payload: dict, scenarios: list[dict]) -> None:
     if meta is None:
         allow()
         return
-    gate_once(session_id, meta)
+    enforce_scenario_context_injection(session_id, meta)
 
 
 def require_exec_phrase(payload: dict, reason: str) -> None:
     """Cursor ask covers PreToolUse without an AskUserQuestion transcript."""
-    prompt_text = last_user_message(payload.get("transcript_path", ""))
+    prompt_text = extract_latest_user_prompt(payload.get("transcript_path", ""))
     if any(phrase in prompt_text for phrase in EXEC_PHRASES):
         return
     message = (
         f"external-write.md: {reason} requires explicit execution "
         "authorization in the current user turn."
     )
-    if cursor_protocol():
+    if is_cursor_runtime():
         ask(message + " Approve this tool call in the Cursor permission card.")
     deny(
         message + " Call AskUserQuestion now "
@@ -405,7 +319,7 @@ def require_exec_phrase(payload: dict, reason: str) -> None:
     )
 
 
-def handle_bash(payload: dict, scenarios: list[dict]) -> None:
+def intercept_bash(payload: dict, scenarios: list[dict]) -> None:
     """Gate a Bash tool call against the hard-deny list and command_glob."""
     session_id = payload.get("session_id", "unknown")
     command = payload.get("tool_input", {}).get("command", "")
@@ -431,14 +345,14 @@ def handle_bash(payload: dict, scenarios: list[dict]) -> None:
             "this git/glab/gh command (not on the read-only allowlist)",
         )
         require_exec_phrase(payload, f"'{matched_pattern}'")
-        gate_once(session_id, ext_write)
+        enforce_scenario_context_injection(session_id, ext_write)
         return
 
-    meta = match_command(scenarios, command)
+    meta = find_matching_command_scenario(scenarios, command)
     if meta is None:
         allow()
         return
-    gate_once(session_id, meta)
+    enforce_scenario_context_injection(session_id, meta)
 
 
 def normalize_payload(raw: dict) -> dict:
@@ -486,9 +400,9 @@ def main() -> None:
     tool_name = payload.get("tool_name", "")
     scenarios = load_scenarios()
     if tool_name in WRITE_TOOLS:
-        handle_edit_write(payload, scenarios)
+        intercept_edit_write(payload, scenarios)
     elif tool_name in SHELL_TOOLS:
-        handle_bash(payload, scenarios)
+        intercept_bash(payload, scenarios)
     elif is_cursor_mcp_external_write(tool_name):
         require_exec_phrase(payload, f"MCP tool '{tool_name}'")
         allow()

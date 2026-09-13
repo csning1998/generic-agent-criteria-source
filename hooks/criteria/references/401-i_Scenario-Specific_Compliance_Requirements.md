@@ -1,7 +1,0 @@
-# **§ 401(i). Scenario-Specific Compliance Requirements**
-
-- **(i) Scenario-Specific Compliance Requirements**：
-    - **MR/PR Template Conformity**：All MR/PR descriptions MUST align strictly with the existing template of the target repository (for example, `merge_request_templates/default.md` for GitLab, or `pull_request_template.md` for GitHub).
-    - **Changes and Fixes Definitions**：The Changes section MUST describe only the net final-state difference between the end of the previous MR and the present submission. The Fixes section MUST record only defects inherited from the previous MR or defects that were already present prior to the current submission. Recording intermediate errors that were introduced on the current branch during development and already corrected on the current branch MUST NOT occur.
-    - **Ansible Task-Include Comments**：A code comment at an `include_tasks` call site MUST NOT exceed three lines. The code comment MUST state only the automation content and one non-obvious technical fact. The code comment MUST NOT repeat the task name.
-    - **Git Commit Messages**：A Git commit message title MUST follow Conventional Commits (Angular format), using the structure `type(scope): description`. Only a commit with the `chore` type MAY omit the scope. The commit message body MUST describe the final state resulting from the change. Debug-reply behavior MUST follow §402.

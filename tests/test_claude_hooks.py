@@ -78,16 +78,18 @@ def test_gate_check_does_not_export_register_helpers() -> None:
     assert not hasattr(gate_check, "COMMENT_CHECK_SKIP_GLOBS")
 
 
-# handle_edit_write end-to-end (gate-check.py)
+# intercept_edit_write end-to-end (gate-check.py)
 
 
-def _run_handle_edit_write(payload, capsys):
+def _run_intercept_edit_write(payload, capsys):
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios=[])
+        gate_check.intercept_edit_write(payload, scenarios=[])
     return json.loads(capsys.readouterr().out)
 
 
-def test_handle_edit_write_allows_inline_trailing_it(tmp_path, capsys) -> None:
+def test_intercept_edit_write_allows_inline_trailing_it(
+    tmp_path, capsys
+) -> None:
     """Pre allows a bare-pronoun comment; Post register reviews after write."""
     target = tmp_path / "sample.py"
     target.write_text("result = calc()  # explains behavior\n")
@@ -99,11 +101,11 @@ def test_handle_edit_write_allows_inline_trailing_it(tmp_path, capsys) -> None:
             "new_string": "it",
         },
     }
-    out = _run_handle_edit_write(payload, capsys)
+    out = _run_intercept_edit_write(payload, capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_handle_edit_write_allows_clean_edit(tmp_path, capsys) -> None:
+def test_intercept_edit_write_allows_clean_edit(tmp_path, capsys) -> None:
     """No scenario match allows an Edit through PreToolUse."""
     target = tmp_path / "sample.py"
     target.write_text("result = calc()  # explains behavior\n")
@@ -115,7 +117,7 @@ def test_handle_edit_write_allows_clean_edit(tmp_path, capsys) -> None:
             "new_string": "the outcome",
         },
     }
-    out = _run_handle_edit_write(payload, capsys)
+    out = _run_intercept_edit_write(payload, capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
@@ -157,13 +159,17 @@ def test_ensure_private_dir_replaces_preexisting_symlink(tmp_path) -> None:
     assert list(victim.iterdir()) == []
 
 
-def test_mark_surfaced_creates_private_marker(tmp_path, monkeypatch) -> None:
-    """mark_surfaced leaves a 0o600 marker under a 0o700 state dir."""
+def test_record_surfaced_scenario_creates_private_marker(
+    tmp_path, monkeypatch
+) -> None:
+    """record_surfaced_scenario leaves a 0o600 marker under a 0o700 dir."""
     state_dir = tmp_path / "post-state"
     monkeypatch.setattr(post_write_review, "STATE_DIR", state_dir)
-    post_write_review.mark_surfaced("session-1", "local-mutate")
-    assert post_write_review.already_surfaced("session-1", "local-mutate")
-    marker_path = post_write_review.marker("session-1", "local-mutate")
+    post_write_review.record_surfaced_scenario("session-1", "local-mutate")
+    assert post_write_review.is_scenario_surfaced("session-1", "local-mutate")
+    marker_path = post_write_review.resolve_marker_path(
+        "session-1", "local-mutate"
+    )
     assert oct(marker_path.stat().st_mode & 0o777) == "0o600"
     assert oct(state_dir.stat().st_mode & 0o777) == "0o700"
 
@@ -376,6 +382,29 @@ def test_find_register_violations_allows_which_alone_across_lines() -> None:
     assert not any("'which' and 'that'" in v for v in violations)
 
 
+def test_find_register_violations_flags_comment_block_over_limit() -> None:
+    """A code comment block exceeding 3 lines trips MAX_COMMENT_BLOCK_LINES."""
+    text = "// line one\n// line two\n// line three\n// line four\n"
+    violations = post_write_review.find_register_violations(
+        text, is_markdown=False
+    )
+    assert any("comment block exceeds" in v for v in violations)
+
+
+def test_find_register_violations_allows_markdown_block_over_limit() -> None:
+    """Markdown prose lines exceeding 3 lines MUST NOT trip limit."""
+    text = (
+        "Line one of markdown documentation.\n"
+        "Line two of markdown documentation.\n"
+        "Line three of markdown documentation.\n"
+        "Line four of markdown documentation.\n"
+    )
+    violations = post_write_review.find_register_violations(
+        text, is_markdown=True
+    )
+    assert not any("comment block exceeds" in v for v in violations)
+
+
 # parse_frontmatter / load_scenarios: criteria file ingestion (gate-check.py)
 
 
@@ -383,14 +412,19 @@ def test_parse_frontmatter_reads_external_write_scenario() -> None:
     """A real multi-line-array criteria file parses id, globs, and load list."""
     root = Path(__file__).resolve().parent.parent
     meta = gate_check.parse_frontmatter(
-        root / "hooks" / "criteria" / "external-write.md"
+        root
+        / "hooks"
+        / "criteria"
+        / "2_context"
+        / "scenarios"
+        / "external-write.md"
     )
     assert meta["id"] == "external-write"
     assert "git " in meta["command_prefix"]
     assert "git push" in meta["command_glob"]
     assert "git status" in meta["readonly_command_glob"]
     assert (
-        "references/301_Default_State_and_Authorization_Boundaries.md"
+        "1_model_behavior/106_Default_Read_Only_and_Authorization.md"
         in meta["load"]
     )
 
@@ -406,22 +440,31 @@ def test_load_scenarios_skips_files_without_id() -> None:
     assert [s["id"] for s in scenarios] == ["a"]
 
 
-# match_path / match_command: scenario routing (gate-check.py)
+# find_most_specific_scenario / find_matching_command_scenario: routing
 
 
-def test_match_path_returns_first_matching_scenario() -> None:
+def test_find_most_specific_scenario_matching_extension_returns_scenario() -> (
+    None
+):
     """The first scenario whose path_glob matches the file name wins."""
     scenarios = [
         {"id": "markdown", "path_glob": ["*.md", "*.mdx"]},
         {"id": "typescript", "path_glob": ["*.ts", "*.tsx"]},
     ]
     assert (
-        gate_check.match_path(scenarios, "/repo/README.md")["id"] == "markdown"
+        gate_check.find_most_specific_scenario(scenarios, "/repo/README.md")[
+            "id"
+        ]
+        == "markdown"
     )
     assert (
-        gate_check.match_path(scenarios, "/repo/app.tsx")["id"] == "typescript"
+        gate_check.find_most_specific_scenario(scenarios, "/repo/app.tsx")["id"]
+        == "typescript"
     )
-    assert gate_check.match_path(scenarios, "/repo/app.py") is None
+    assert (
+        gate_check.find_most_specific_scenario(scenarios, "/repo/app.py")
+        is None
+    )
 
 
 NARROW_PATH_GLOB = (
@@ -474,7 +517,7 @@ def specificity_gate_criteria(tmp_path: Path) -> Path:
         "prefix_NESTED_suffix.md",
     ],
 )
-def test_gate_once_surfaces_narrow_scenario_load(
+def test_intercept_edit_write_narrow_scenario_denies_and_injects_context(
     specificity_gate_criteria: Path, filename: str, capsys
 ) -> None:
     """Narrow path_glob match denies with the narrow scenario load."""
@@ -484,7 +527,7 @@ def test_gate_once_surfaces_narrow_scenario_load(
         "tool_input": {"file_path": str(target), "content": "# title\n"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, gate_check.load_scenarios())
+        gate_check.intercept_edit_write(payload, gate_check.load_scenarios())
     out = json.loads(capsys.readouterr().out)
     context = out["hookSpecificOutput"]["additionalContext"]
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -492,12 +535,12 @@ def test_gate_once_surfaces_narrow_scenario_load(
     assert "NARROW_LOAD_B_MARKER" in context
 
 
-def test_gate_once_broad_md_gets_broad_load_only(
+def test_intercept_edit_write_broad_scenario_injects_broad_context_only(
     specificity_gate_criteria: Path, capsys
 ) -> None:
     """A path matched only by *.md gets the broad scenario load."""
     scenarios = gate_check.load_scenarios()
-    meta = gate_check.match_path(scenarios, "/repo/other.md")
+    meta = gate_check.find_most_specific_scenario(scenarios, "/repo/other.md")
     assert meta["id"] == "broad-md"
     target = specificity_gate_criteria / "other.md"
     payload = {
@@ -505,7 +548,7 @@ def test_gate_once_broad_md_gets_broad_load_only(
         "tool_input": {"file_path": str(target), "content": "# title\n"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios)
+        gate_check.intercept_edit_write(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
     context = out["hookSpecificOutput"]["additionalContext"]
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -513,54 +556,66 @@ def test_gate_once_broad_md_gets_broad_load_only(
     assert "NARROW_LOAD_A_MARKER" not in context
 
 
-def test_match_command_returns_first_matching_scenario() -> None:
+def test_find_matching_command_scenario_matching_prefix_returns_scenario() -> (
+    None
+):
     """The first scenario whose command_glob substring matches wins."""
     scenarios = [
         {"id": "external-write", "command_glob": ["git push", "git commit"]}
     ]
     assert (
-        gate_check.match_command(scenarios, "git push origin main")["id"]
+        gate_check.find_matching_command_scenario(
+            scenarios, "git push origin main"
+        )["id"]
         == "external-write"
     )
-    assert gate_check.match_command(scenarios, "ls -la") is None
+    assert (
+        gate_check.find_matching_command_scenario(scenarios, "ls -la") is None
+    )
 
 
-# gate_once: once-per-session deny-then-allow semantics (gate-check.py)
+# enforce_scenario_context_injection: once-per-session semantics
 
 
-def _run_gate_once(session_id, meta, capsys):
+def _run_enforce_injection(session_id, meta, capsys):
     with pytest.raises(SystemExit):
-        gate_check.gate_once(session_id, meta)
+        gate_check.enforce_scenario_context_injection(session_id, meta)
     return json.loads(capsys.readouterr().out)
 
 
-def test_gate_once_denies_first_call_then_allows_retry(capsys) -> None:
+def test_enforce_scenario_context_injection_first_call_denies_then_allows_retry(
+    capsys,
+) -> None:
     """Section 2: the 1st call denies and surfaces load text; the 2nd allows."""
     meta = {"id": "local-mutate", "load": []}
-    first = _run_gate_once("session-1", meta, capsys)
+    first = _run_enforce_injection("session-1", meta, capsys)
     assert first["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert (
         "local-mutate"
         in first["hookSpecificOutput"]["permissionDecisionReason"]
     )
-    second = _run_gate_once("session-1", meta, capsys)
+    second = _run_enforce_injection("session-1", meta, capsys)
     assert second["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_gate_once_isolates_by_scenario_within_the_same_session(capsys) -> None:
+def test_enforce_scenario_context_injection_isolates_by_scenario_within_session(
+    capsys,
+) -> None:
     """Surfacing one scenario does not pre-clear a different scenario id."""
     meta_a = {"id": "scenario-a", "load": []}
     meta_b = {"id": "scenario-b", "load": []}
-    _run_gate_once("session-1", meta_a, capsys)
-    second = _run_gate_once("session-1", meta_b, capsys)
+    _run_enforce_injection("session-1", meta_a, capsys)
+    second = _run_enforce_injection("session-1", meta_b, capsys)
     assert second["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_gate_once_isolates_by_session_for_the_same_scenario(capsys) -> None:
+def test_enforce_scenario_context_injection_isolates_by_session(
+    capsys,
+) -> None:
     """A scenario surfaced under one session_id still denies under another."""
     meta = {"id": "local-mutate", "load": []}
-    _run_gate_once("session-1", meta, capsys)
-    other_session = _run_gate_once("session-2", meta, capsys)
+    _run_enforce_injection("session-1", meta, capsys)
+    other_session = _run_enforce_injection("session-2", meta, capsys)
     assert other_session["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
@@ -580,7 +635,7 @@ def test_require_exec_phrase_returns_silently_when_phrase_present(
 ) -> None:
     """A transcript line carrying an EXEC_PHRASES token needs no denial."""
     payload = {
-        "transcript_path": _write_transcript(tmp_path, "去執行 git push")
+        "transcript_path": _write_transcript(tmp_path, "請執行 git push")
     }
     gate_check.require_exec_phrase(payload, "'git push'")
 
@@ -598,7 +653,7 @@ def test_require_exec_phrase_denies_when_phrase_absent(capsys) -> None:
     )
 
 
-def test_require_exec_phrase_asks_under_cursor_protocol(
+def test_require_exec_phrase_asks_under_cursor_runtime(
     monkeypatch, capsys
 ) -> None:
     """Cursor: absent phrase asks via the native permission card."""
@@ -612,12 +667,13 @@ def test_require_exec_phrase_asks_under_cursor_protocol(
     assert out["permission"] == "ask"
 
 
-# handle_bash: hard-deny list, external-write allowlist, gate_once integration
+# intercept_bash: hard-deny list, external-write allowlist,
+# enforce_scenario_context_injection
 
 
-def _run_handle_bash(payload, scenarios, capsys):
+def _run_intercept_bash(payload, scenarios, capsys):
     with pytest.raises(SystemExit):
-        gate_check.handle_bash(payload, scenarios=scenarios)
+        gate_check.intercept_bash(payload, scenarios=scenarios)
     return json.loads(capsys.readouterr().out)
 
 
@@ -629,13 +685,13 @@ EXTERNAL_WRITE_META = {
 }
 
 
-def test_handle_bash_hard_denies_force_push(capsys) -> None:
+def test_intercept_bash_hard_denies_force_push(capsys) -> None:
     """Git push --force is denied regardless of scenario or exec phrase."""
     payload = {
         "session_id": "s1",
         "tool_input": {"command": "git push --force origin main"},
     }
-    out = _run_handle_bash(payload, [], capsys)
+    out = _run_intercept_bash(payload, [], capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert (
         "must never run"
@@ -643,36 +699,36 @@ def test_handle_bash_hard_denies_force_push(capsys) -> None:
     )
 
 
-def test_handle_bash_hard_denies_rm_rf(capsys) -> None:
+def test_intercept_bash_hard_denies_rm_rf(capsys) -> None:
     """Rm -rf is denied regardless of scenario or exec phrase."""
     payload = {"session_id": "s1", "tool_input": {"command": "rm -rf /tmp/x"}}
-    out = _run_handle_bash(payload, [], capsys)
+    out = _run_intercept_bash(payload, [], capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_handle_bash_allows_readonly_git_without_exec_phrase(capsys) -> None:
+def test_intercept_bash_allows_readonly_git_without_exec_phrase(capsys) -> None:
     """A readonly_command_glob entry needs no exec phrase."""
     payload = {"session_id": "s1", "tool_input": {"command": "git status"}}
-    out = _run_handle_bash(payload, [EXTERNAL_WRITE_META], capsys)
+    out = _run_intercept_bash(payload, [EXTERNAL_WRITE_META], capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_handle_bash_denies_git_push_without_exec_phrase(capsys) -> None:
+def test_intercept_bash_denies_git_push_without_exec_phrase(capsys) -> None:
     """Allowlisted write with no exec phrase denies via require_exec_phrase."""
     payload = {
         "session_id": "s1",
         "transcript_path": "",
         "tool_input": {"command": "git push origin main"},
     }
-    out = _run_handle_bash(payload, [EXTERNAL_WRITE_META], capsys)
+    out = _run_intercept_bash(payload, [EXTERNAL_WRITE_META], capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "git push" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-def test_handle_bash_allows_git_push_after_exec_phrase_and_retry(
+def test_intercept_bash_allows_git_push_after_exec_phrase_and_retry(
     tmp_path, capsys
 ) -> None:
-    """With the phrase present, gate_once denies once then allows retry."""
+    """Phrase present: injection denies once, then a retry is allowed."""
     payload = {
         "session_id": "s1",
         "transcript_path": _write_transcript(
@@ -680,16 +736,16 @@ def test_handle_bash_allows_git_push_after_exec_phrase_and_retry(
         ),
         "tool_input": {"command": "git push origin main"},
     }
-    first = _run_handle_bash(payload, [EXTERNAL_WRITE_META], capsys)
+    first = _run_intercept_bash(payload, [EXTERNAL_WRITE_META], capsys)
     assert first["hookSpecificOutput"]["permissionDecision"] == "deny"
-    second = _run_handle_bash(payload, [EXTERNAL_WRITE_META], capsys)
+    second = _run_intercept_bash(payload, [EXTERNAL_WRITE_META], capsys)
     assert second["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_handle_bash_allows_when_no_scenario_matches(capsys) -> None:
+def test_intercept_bash_allows_when_no_scenario_matches(capsys) -> None:
     """An unrelated command with no matching scenario passes through."""
     payload = {"session_id": "s1", "tool_input": {"command": "ls -la"}}
-    out = _run_handle_bash(payload, [EXTERNAL_WRITE_META], capsys)
+    out = _run_intercept_bash(payload, [EXTERNAL_WRITE_META], capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
@@ -725,7 +781,7 @@ def test_normalize_payload_prefers_claude_native_fields() -> None:
     assert normalized["tool_input"]["file_path"] == "/tmp/y.py"
 
 
-def test_is_cursor_mcp_external_write_requires_cursor_protocol(
+def test_is_cursor_mcp_external_write_requires_cursor_runtime(
     monkeypatch,
 ) -> None:
     """The MCP-write marker match only applies under the Cursor adapter."""
@@ -746,7 +802,7 @@ def test_is_cursor_mcp_external_write_requires_cursor_protocol(
 # NOTEBOOK_GLOBS: .ipynb denial must land before any disk write is attempted
 
 
-def test_handle_edit_write_denies_ipynb_and_leaves_no_file_on_disk(
+def test_intercept_edit_write_denies_ipynb_and_leaves_no_file_on_disk(
     tmp_path, capsys
 ) -> None:
     """notebook.md is a hard policy: deny fires before the target ever exists.
@@ -762,16 +818,16 @@ def test_handle_edit_write_denies_ipynb_and_leaves_no_file_on_disk(
         "tool_input": {"file_path": str(target), "content": "{}"},
     }
     with pytest.raises(SystemExit):
-        gate_check.handle_edit_write(payload, scenarios=[])
+        gate_check.intercept_edit_write(payload, scenarios=[])
     out = json.loads(capsys.readouterr().out)
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "notebook" in out["hookSpecificOutput"]["permissionDecisionReason"]
     assert not target.exists()
 
 
-# PreToolUse vs PostToolUse labeling: gate_once denies once and allows a
-# retry only while gate-check.py stays a PreToolUse hook. A relabel to
-# PostToolUse would let the write land before the deny fires.
+# PreToolUse vs PostToolUse labeling:
+# enforce_scenario_context_injection denies once and allows a retry
+# only while gate-check.py stays PreToolUse. PostToolUse lets writes land.
 
 
 def test_gate_check_deny_and_allow_stay_pretooluse(capsys) -> None:

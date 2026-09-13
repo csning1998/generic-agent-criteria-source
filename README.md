@@ -1,197 +1,238 @@
-# README for The Repository
+# Generic Agent Criteria Source
 
-The working tree of this repository maps directly to `~/.grok`. Grok installation populates `~/.grok` with runtime files. Consequently `git clone` against this non-empty directory fails. The setup attaches a Git remote to the existing `~/.grok` directory and checks out `main`.
+This repository serves as the Single Source of Truth for agent behavior rules, contextual scenarios, engineering register standards, and technology domain principles. The repository materializes these specifications into runtime environments across multiple agent hosts, including Claude Code, Cursor, Gemini, and Grok.
 
-## Section 1. Clone Repository into Existing Grok Home
+```mermaid
+graph TD
+    SSOT[generic-agent-criteria-source] --> AXIS1["1_model_behavior<br/>Global Invariants: § 101 - § 112"]
+    SSOT --> AXIS2["2_context<br/>Task Scenarios and Domain Principles"]
+    SSOT --> AXIS3["3_register<br/>Register and Technical Style: § 301 - § 307"]
+    SSOT --> AXIS4["4_L2-trigger<br/>Language-Specific Rules"]
 
-### Task A. Prerequisites
+    AXIS2 --> CONTEXT_CORE["§ 201 - § 205: Execution Predicates and Scenarios"]
+    AXIS2 --> DOMAIN["2_context/domain/<br/>Architecture Principles: 40-Secrets to 99-Contract"]
+    AXIS2 --> SCENARIOS["2_context/scenarios/<br/>Task Scenarios and languages.md Dispatch Table"]
 
-1. Grok is installed and initialized via at least one successful login, generating `~/.grok/auth.json`.
-2. SSH connectivity to `gitlab.com` is established with read access to `csning1998-lab/personal/skills-xai-supergrok`.
-3. Target remote URI is `git@gitlab.com:csning1998-lab/personal/skills-xai-supergrok.git`.
-4. Local directory `~/.grok` is not an existing Git repository.
-
-### Task B. Tracked and Untracked Path Behavior
-
-`.gitignore` enforces an allow list model. Checkout operations mutate only tracked repository paths.
-
-- **Paths Overwritten or Created During Checkout:**
-    - `skills/`
-    - `docs/second-brain/`
-    - `docs/.markdownlint.json`
-    - `docs/.mdlrc`
-    - `memory/`
-    - `terraform/`
-    - `.gitlab-ci.yml`
-    - `.gitlab/CODEOWNERS`
-    - `.gitignore`
-    - `tutorial-git-clone.md`
-    - `config.toml`. A pre-installed environment typically already contains this file. Conflict handling is Section 1 Task C.3.
-
-- **Paths Preserved During Checkout:**
-    - `auth.json`
-    - `sessions/`
-    - `bin/`
-    - `bundled/`
-    - `downloads/`
-    - `vendor/`
-    - `marketplace-cache/`
-    - `docs/user-guide/`
-    - `logs/`
-    - `memtrace/`
-    - `.lock` files, temporary caches, and `worktrees.db`
-
-`git checkout -f` overwrites tracked local modifications. Untracked files which block working tree checkout remain.
-
-### Task C. Execution Steps
-
-1. **Verify Grok Directory Context**
-
-    ```bash
-    test -d "${HOME}/.grok"
-    test -f "${HOME}/.grok/auth.json"
-    ```
-
-    Execute subsequent steps only if both commands return exit code `0`.
-
-2. **Initialize Repository and Attach Remote**
-
-    ```bash
-    cd "${HOME}/.grok"
-    git init --initial-branch=main
-    git remote add origin git@gitlab.com:csning1998-lab/personal/skills-xai-supergrok.git
-    git fetch origin
-    ```
-
-    If `git init` reports an existing repository, the state MUST be inspected via `git remote -v` and `git status` to verify repository identity before the `origin` remote URL is updated.
-
-3. **Resolve `config.toml` Conflict**
-
-    Existing installations contain an untracked `config.toml` which conflicts with the tracked repository file. The conflict causes `git checkout` to fail with `untracked working tree files would be overwritten`. Relocate local configuration to permit repository checkout:
-
-    ```bash
-    mv config.toml config.toml.local
-    ```
-
-    Machine-specific UI or model configurations MUST be merged manually from `config.toml.local` into `config.toml` after checkout. Authentication credentials reside in `auth.json`.
-
-4. **Checkout Branch `main`**
-
-    ```bash
-    git checkout -B main origin/main
-    git status -sb
-    git config core.hooksPath .githooks
-    ```
-
-    The tracking state MUST indicate `main...origin/main`. The presence of `skills/`, `docs/second-brain/`, `memory/`, and `terraform/` MUST be confirmed. If untracked file conflicts persist, conflicting paths MUST be relocated before checkout is re-executed.
-
-5. **Post-Checkout Verification**
-    1. Execute `grok` to verify authentication validity.
-    2. Terraform operations targeting GitLab projects MUST use local credentials: `~/.vault-token`, `~/.terraform.d/credentials.tfrc.json`, and `~/GitLab/meta-platform/vault/tls/ca.pem`. State is hosted on the GitLab HTTP backend (Project ID: `85419450`).
-    3. `auth.json` MUST NOT be transferred across hosts.
-    4. `git rev-parse --git-path hooks` MUST print `.githooks`. Tracked hooks are `pre-commit` (gitleaks) and `commit-msg` (commitlint). Both run via `podman run`.
-    5. Harness adapters MUST be materialized according to Section 3.
-
-6. **Prohibited Operations**
-    1. Executing `git clone ... ~/.grok` directly against populated `~/.grok` MUST be prohibited.
-    2. Overwriting `~/.grok` with a temporary clone directory containing `sessions/` or `auth.json` MUST be prohibited.
-    3. Relying on `git checkout -f` to clear untracked `config.toml` files MUST be prohibited.
-
-## Section 2. Terraform Operations
-
-The Bastion Vault instance under `meta-platform` MUST be unsealed. Prior to executing Terraform commands, HTTP state backend credentials MUST be exported:
-
-```bash
-export TF_HTTP_USERNAME='gitlab-ci-token'
-export TF_HTTP_PASSWORD=$(VAULT_ADDR='https://127.0.0.1:8200' VAULT_CACERT="$HOME/GitLab/meta-platform/vault/tls/ca.pem" VAULT_TOKEN=$(cat $HOME/.vault-token) vault kv get -field=token secret/meta-platform-credentials/state-backend)
+    SCENARIOS -.->|"Path Glob and Extension"| AXIS4
+    AXIS3 -.->|"Medium Classification"| AXIS4
 ```
 
-## Section 3. Harness Adapter Installer
+## Section 0. Operational Commands and Verification
 
-`~/.claude`, `~/.agents`, and `~/.gemini` are product homes. Product homes MUST NOT enter this repository. Distill, skill bodies shared across harnesses, and the Claude thin shell have their source of truth in this tree. `hooks/bin/install-adapters.py` materializes the runtime copies.
+### Item A. Adapter Status Inspection and Materialization
 
-The installer is written in Python. The installer MUST NOT call `cp`, `ln`, `rsync`, or `subprocess`. The default verb is `check`. The `apply` verb writes destinations and constitutes a local execute act under §301.
+The installer operates in read-only inspection mode by default. Materializing files requires the explicit `apply` verb:
 
-### Item A. Source of truth
-
-Grok reads `rules/AGENT_CRITERIA.md` directly. The distill path is not an installer destination.
-
-Tracked sources the installer reads:
-
-- Distill: `rules/AGENT_CRITERIA.md`
-- Claude thin shell: `hooks/adapters/claude/CLAUDE.md`
-- Skill bodies: `hooks/adapters/skills/`
-- Language L2: `hooks/criteria/references/lang-*.md`
-
-`config.example.toml` keeps `[skills] paths = ["~/.agents/skills"]`. After `apply`, the skills path is a symlink to `hooks/adapters/skills`.
-
-### Item B. Commands
-
-Run from `${HOME}/.grok`:
-
-1. Environment checks MUST be performed first using the following command:
+1. **Inspect adapter status without modifying state**
 
     ```bash
     uv run python hooks/bin/install-adapters.py check
     ```
 
-    The `check` command reads adapter states and prints `OK` or `DRIFT` without mutating state. The `apply` command prints `APPLY`, `SKIP`, or `ABORT` and materializes files as needed. Optional `--home` and `--grok-root` flags are provided for testing. Production invocations MUST omit testing flags and MUST use `${HOME}`.
-
-2. The installer MUST be executed once the environment is confirmed healthy:
+2. **Materialize and reconcile allow-listed adapter files**
 
     ```bash
     uv run python hooks/bin/install-adapters.py apply
     ```
 
-3. Python unit tests MAY be executed using the following command:
+### Item B. Test Execution
 
-    ```bash
-    uv run pytest tests/test_install_adapters.py
-    ```
+The test suite validates adapter synchronization, scenario parsing, hook gate decisions, and register scanning. Execute unit and integration tests by:
 
-### Item C. Destinations on the allow list
+```bash
+.venv/bin/pytest -v
+```
 
-| Source                                            | Dest                                  | Mode       |
-| ------------------------------------------------- | ------------------------------------- | ---------- |
-| `rules/AGENT_CRITERIA.md`                         | `~/.agents/AGENTS.md`                 | symlink    |
-| `rules/AGENT_CRITERIA.md`                         | `~/.gemini/GEMINI.md`                 | symlink    |
-| `hooks/adapters/claude/CLAUDE.md`                 | `~/.claude/CLAUDE.md`                 | copy       |
-| `hooks/adapters/skills`                           | `~/.agents/skills`                    | symlink    |
-| `hooks/criteria`                                  | `~/.agents/criteria`                  | symlink    |
-| `rules/ENGINEERING_PRINCIPLES.md`                 | `~/.agents/ENGINEERING_PRINCIPLES.md` | symlink    |
-| `hooks/criteria/references/lang-md.md`            | `~/.claude/lang_md.md`                | symlink    |
-| `hooks/criteria/references/lang-hcl.md`           | `~/.claude/lang_hcl.md`               | symlink    |
-| `hooks/criteria/references/lang-ts.md`            | `~/.claude/lang_ts.md`                | symlink    |
-| `hooks/criteria/references/lang-ipynb.md`         | `~/.claude/lang_ipynb.md`             | symlink    |
-| `hooks/criteria/references/lang-md.md`            | `~/.gemini/lang_md.md`                | symlink    |
-| `hooks/criteria/references/lang-hcl.md`           | `~/.gemini/lang_hcl.md`               | symlink    |
-| `hooks/criteria/references/lang-ts.md`            | `~/.gemini/lang_ts.md`                | symlink    |
-| `hooks/criteria/references/lang-ipynb.md`         | `~/.gemini/lang_ipynb.md`             | symlink    |
-| `hooks/criteria/2_context/scenarios/languages.md` | `~/.cursor/rules/lang-<id>.mdc`       | cursor-mdc |
-| `hooks/adapters/claude/gate-check.py`             | `~/.cursor/hooks/gate-check.py`       | copy       |
-| `hooks/adapters/cursor/hooks.json`                | `~/.cursor/hooks.json`                | copy       |
+### Item C. Static Analysis and Linting
 
-Cursor destinations are derived from each entry in `hooks/criteria/2_context/scenarios/languages.md`. The installer renders a thin `.mdc` whose `globs` match the `cursor_globs` field of the matching entry. The `.mdc` body cites each `load:` path under `~/.agents/criteria/`. L2 files remain in `hooks/criteria/references/`. Distill is not written under `~/.cursor/`. The installer copies Claude `gate-check.py`. The installer copies a Cursor `hooks.json`. PreToolUse can then deny the first matching write in a session.
+Code modifications across Python modules and test files must comply with project formatting and import order constraints. Verify Python source compliance by:
 
-The Claude destination is copy mode because the Claude destination file MUST keep `@~/.agents/AGENTS.md` plus §403 and §205(f). Destinations outside this table MUST be rejected. The installer MUST NOT write `settings.json`, `settings.local.json`, `oauth_creds.json`, `auth.json`, `control.key`, `daemon/`, `sessions/`, or `file-history/`. The installer MUST NOT replace `~/.claude`, `~/.agents`, `~/.gemini`, `~/.grok`, or `~/.cursor` as a whole.
+```bash
+ruff check .
+```
 
-### Item D. Drift tokens and abort
+## Section 1. Four-Axis Criteria Architecture
 
-`check` reports one token per destination:
+The criteria system decouples requirements across four mutually exclusive and collectively exhaustive directories. Global mandates remain active across all operational phases. Task scenarios, register constraints, and language rules activate conditionally upon matching operational context.
 
-- `missing`: dest is absent
-- `regular-same`: dest is a regular file or directory whose bytes match the source. `apply` replaces the dest with a symlink
-- `regular-differs`: dest bytes do not match the source. `apply` prints `ABORT` for the `apply` run and writes no destination
-- `wrong-symlink` / `broken-symlink`: dest is a symlink whose target is not the source. `apply` recreates the symlink
-- `copy-differs`: Claude thin shell or Cursor `.mdc` bytes differ. `apply` overwrites from the tracked or rendered source
+1. `1_model_behavior/`: Global behavioral invariants (§ 101 through § 112). These clauses govern identity disambiguation, MECE analytical standards, default read-only boundaries, priority queues, immediate halt controls, and minimalist verification reporting. Every agent execution MUST adhere to these rules by default.
+2. `2_context/`: Contextual task scenarios and engineering domain principles (§ 201 through § 205, `scenarios/`, and `domain/`). These clauses define operational predicates, Test-Driven Development lifecycles, Merge Request authoring, Conventional Commit generation, and technology domain guidelines.
+3. `3_register/`: Professional register and syntax specifications (§ 301 through § 307). These clauses define impersonal tone, vocabulary prohibitions, general coding standards, code comment limits, and RFC 7322 / ISO/IEC Directives Part 2 prose structures.
+4. `4_L2-trigger/`: Programming language-specific constraints (`golang.md`, `typescript.md`, `hcl.md`, `yaml.md`, `markdown.md`, and `ipynb.md`). A file in this directory activates only when a targeted file extension matches the dispatch patterns defined in `2_context/scenarios/languages.md`.
 
-A destination whose relative path contains `..`, or which would escape `--home`, MUST be rejected before any write.
+## Section 2. Criteria Evaluation Pipeline
 
-### Item E. Outside this installer
+### Item A. Evaluation Pipeline Topology
 
-The following adapters are not materialized here:
+When an operational request or tool call enters the runtime, the evaluation pipeline enforces rules through four sequential tiers:
 
-- Claude Code `.claude/rules/*.md` with `paths:` globs
-- Grok PreToolUse language gate
+```mermaid
+graph LR
+    Req([User Prompt or Tool Call Trigger]) --> Tier1
 
-Until the missing adapters exist, the executing Agent opens the matching scenario file under `hooks/criteria/` and the files listed in its `load:`.
+    subgraph Tier1 ["Tier 1: Global Invariants (1_model_behavior)"]
+        direction TB
+        G101["§ 101 Identity Mandate"] --> G102["§ 102 MECE Analytical Standard"]
+        G102 --> G106["§ 106 Default Read-Only and Authorization"]
+        G106 --> G108["§ 108 Mandatory Halt and Review"]
+        G108 --> G111["§ 111 Minimalist Verification Reporting"]
+    end
+
+    Tier1 --> EvalAct{§ 201 Act Predicate Evaluation}
+
+    subgraph Tier2 ["Tier 2: Contextual Specialization (2_context)"]
+        direction TB
+        EvalAct -- Planning Phase --> PlanBranch["reply.md<br/>§ 104 Evidence and § 109 Convergence"]
+        EvalAct -- Local File Mutation --> MutateBranch["local-mutate.md / tdd.md<br/>§ 202 Test-Driven Development"]
+        EvalAct -- External Write --> ExtBranch["external-write.md / mr.md / commit.md<br/>§ 204 MR Specs and § 205 Commit Specs"]
+        PlanBranch & MutateBranch & ExtBranch --> DomainCheck["2_context/domain/<br/>Architecture Principles: 40-Secrets to 99-Contract"]
+    end
+
+    Tier2 --> EvalMedium{Output Medium Evaluation}
+
+    subgraph Tier3 ["Tier 3: Register and Style Binding (3_register)"]
+        direction TB
+        EvalMedium -- Dialogue --> RegDialogue["§ 301 Objective Tone<br/>§ 302 Vocabulary Prohibitions"]
+        EvalMedium -- Technical Prose --> RegProse["§ 305 RFC 7322 and ISO Structure<br/>Single Event Per Sentence"]
+        EvalMedium -- Source Code --> RegCode["§ 303 Coding Standards<br/>§ 304 Comment Lifecycle<br/>§ 306 Identifier Naming"]
+    end
+
+    RegProse & RegCode --> EvalPath{File Extension Matched?}
+
+    subgraph Tier4 ["Tier 4: Language-Specific Constraints (4_L2-trigger)"]
+        direction TB
+        EvalPath -- "languages.md Match" --> L2Spec["golang.md / typescript.md / hcl.md<br/>yaml.md / markdown.md / ipynb.md"]
+        L2Spec --> Reg307["§ 307 L2 Integration Verification"]
+    end
+
+    RegDialogue --> Out([Completed Response or Tool Execution])
+    Reg307 --> Out
+```
+
+### Item B. Tier Breakdown
+
+1. **Global Invariants (Tier 1)**: Initial evaluation subjects every prompt and action to the behavioral mandates in `1_model_behavior/`. § 101 controls identity boundaries. § 102 enforces structured problem decomposition. § 106 enforces read-only operation until explicit authorization occurs. § 108 intercepts halt directives. § 111 limits execution responses to verification evidence.
+2. **Contextual Specialization (Tier 2)**: § 201 evaluates the operational act:
+    - A planning or inquiry interaction routes to `reply.md`, binding § 104 due diligence and § 109 single recommendation convergence.
+    - A working-tree byte modification routes to `local-mutate.md`, binding § 202 Test-Driven Development whenever test paths match.
+    - A command modifying remote state (`git push`, `glab`, `gh`, or MCP write) routes to `external-write.md`, binding § 204 for Merge Requests or § 205 for Conventional Commits.
+    - Technology-specific system changes incorporate matching domain principles from `2_context/domain/`.
+3. **Register Binding (Tier 3)**: Output generation attaches structural constraints based on medium:
+    - Dialogue must satisfy § 301 impersonal tone and § 302 vocabulary limits.
+    - Documentation and commit text must satisfy § 305 sentence independence rules.
+    - Source code must satisfy § 303 standards, § 304 comment line limits, and § 306 function naming conventions.
+4. **Language Constraints (Tier 4)**: File paths matching patterns in `2_context/scenarios/languages.md` attach corresponding rules from `4_L2-trigger/`. § 307 completes the validation loop.
+
+### Item C. Runtime Hook Execution Lifecycle
+
+Claude Code and Cursor environments enforce criteria compliance via PreToolUse, PostToolUse, and Stop hooks.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant Agent as Agent Runtime
+    participant PreHook as PreToolUse Hook (gate-check.py)
+    participant State as Session Marker Tree (/tmp)
+    participant Disk as Local Workspace and Tools
+    participant PostHook as PostToolUse Hook (post-write-review.py)
+
+    User->>Agent: Prompt or Instruction
+    Agent->>PreHook: Invokes Tool Call (Edit, Write, Bash)
+
+    alt Hard Deny Triggered (git push -f, rm -rf)
+        PreHook-->>Agent: DENY (Permanent Rejection)
+    else External Write Operation
+        alt Execution Phrase Absent in Current Turn
+            PreHook-->>Agent: DENY / ASK (Demands Explicit Execution Authorization)
+        end
+    end
+
+    PreHook->>State: Check Scenario Marker (is_scenario_surfaced)
+    alt First Time Encountered in Session
+        PreHook->>State: Record Marker (record_surfaced_scenario)
+        PreHook-->>Agent: DENY (Injects Scenario Bundle Text and Requests Retry)
+    else Previously Surfaced in Session
+        PreHook-->>Agent: ALLOW (Permits Tool Execution)
+    end
+
+    Agent->>Disk: Executes Disk Mutation or Shell Command
+    Disk-->>PostHook: Emits Tool Result
+    PostHook->>PostHook: Executes Mechanical Register Scan (§ 304, § 305)
+    alt Register Violation Detected
+        PostHook-->>Agent: EMIT VIOLATION (Requires Immediate In-File Remediation)
+    else Clean Register Check
+        PostHook-->>Agent: Silent Continuation
+    end
+```
+
+### Item D. Hook Operation Contracts
+
+1. **PreToolUse (`hooks/adapters/claude/gate-check.py`)**: Intercepts `Edit`, `Write`, `StrReplace`, `TabWrite`, and `Bash` operations. Blocks destructive commands immediately. Demands an authorization phrase for external write operations. When an operational scenario triggers for the first time in a session, the hook records a state marker, rejects the call, and surfaces the scenario bundle text for immediate retry. Subsequent calls with that scenario ID pass through without interruption.
+2. **PostToolUse (`hooks/adapters/claude/post-write-review.py`)**: Reviews file modifications landing on disk. Scans modified lines for register violations, including bare pronoun references, uncoordinated causal conjunctions, and excessive comment lengths. Detected violations require immediate correction before subsequent tool execution.
+3. **Shared Parser Module (`hooks/adapters/claude/scenario_parser.py`)**: Centralizes YAML frontmatter extraction, scenario directory traversal, and path glob specificity calculations.
+
+## Section 3. Harness Adapter Installation and Reconciliation
+
+### Item A. Installation-Evaluation State Machine
+
+The adapter installer (`hooks/adapter_install/install.py`) materializes repository sources into runtime target paths under product homes (`~/.agents`, `~/.claude`, `~/.cursor`, `~/.grok`, `~/.gemini`). The installer relies exclusively on Python standard library modules without invoking external shell commands or subprocesses.
+
+```mermaid
+graph LR
+    Start([Inspect Adapter Destination]) --> CheckDest{Destination Exists?}
+    CheckDest -- No --> RetMissing[State: missing]
+    CheckDest -- Yes --> IsSymlink{Is Symlink?}
+
+    IsSymlink -- Yes --> CheckModeSymlink{Spec Mode is Symlink?}
+    CheckModeSymlink -- No --> RetSymForCopy[State: symlink-for-copy]
+    CheckModeSymlink -- Yes --> CheckTarget{Target Equals Source?}
+    CheckTarget -- Yes --> RetOK[State: ok]
+    CheckTarget -- No --> RetWrong[State: wrong-symlink or broken-symlink]
+
+    IsSymlink -- No --> CheckRegular{Spec Mode is Copy or MDC?}
+    CheckRegular -- Yes --> CompareBytes{Content Equals Rendered Payload?}
+    CompareBytes -- Yes --> RetOK
+    CompareBytes -- No --> RetCopyDiffers[State: copy-differs]
+
+    CheckRegular -- No --> CompareTree{Directory Content Matches Source?}
+    CompareTree -- Yes --> RetRegSame[State: regular-same]
+    CompareTree -- No --> RetRegDiff[State: regular-differs -> Abort Execution]
+```
+
+### Item B. Allow-Listed Adapter Destinations
+
+| Source Path                                       | Destination Path                       | Mode       |
+| ------------------------------------------------- | -------------------------------------- | ---------- |
+| `rules/AGENT_CRITERIA.md`                         | `~/.agents/AGENTS.md`                  | symlink    |
+| `rules/AGENT_CRITERIA.md`                         | `~/.gemini/GEMINI.md`                  | symlink    |
+| `hooks/adapters/claude/CLAUDE.md`                 | `~/.claude/CLAUDE.md`                  | copy       |
+| `hooks/adapters/claude/gate-check.py`             | `~/.claude/hooks/gate-check.py`        | copy       |
+| `hooks/adapters/claude/post-write-review.py`      | `~/.claude/hooks/post-write-review.py` | copy       |
+| `hooks/adapters/claude/scenario_parser.py`        | `~/.claude/hooks/scenario_parser.py`   | copy       |
+| `hooks/adapters/claude/gate-check.py`             | `~/.cursor/hooks/gate-check.py`        | copy       |
+| `hooks/adapters/claude/post-write-review.py`      | `~/.cursor/hooks/post-write-review.py` | copy       |
+| `hooks/adapters/claude/scenario_parser.py`        | `~/.cursor/hooks/scenario_parser.py`   | copy       |
+| `hooks/adapters/cursor/stop-output-scan.py`       | `~/.cursor/hooks/stop-output-scan.py`  | copy       |
+| `hooks/adapters/cursor/skill-module-gate.py`      | `~/.cursor/hooks/skill-module-gate.py` | copy       |
+| `hooks/adapters/cursor/hooks.json`                | `~/.cursor/hooks.json`                 | copy       |
+| `hooks/adapters/skills`                           | `~/.agents/skills`                     | symlink    |
+| `hooks/criteria`                                  | `~/.agents/criteria`                   | symlink    |
+| `rules/ENGINEERING_PRINCIPLES.md`                 | `~/.agents/ENGINEERING_PRINCIPLES.md`  | symlink    |
+| `hooks/criteria/4_L2-trigger/markdown.md`         | `~/.claude/lang_md.md`                 | symlink    |
+| `hooks/criteria/4_L2-trigger/hcl.md`              | `~/.claude/lang_hcl.md`                | symlink    |
+| `hooks/criteria/4_L2-trigger/typescript.md`       | `~/.claude/lang_ts.md`                 | symlink    |
+| `hooks/criteria/4_L2-trigger/ipynb.md`            | `~/.claude/lang_ipynb.md`              | symlink    |
+| `hooks/criteria/4_L2-trigger/yaml.md`             | `~/.claude/lang_yaml.md`               | symlink    |
+| `hooks/criteria/4_L2-trigger/golang.md`           | `~/.claude/lang_go.md`                 | symlink    |
+| `hooks/criteria/4_L2-trigger/markdown.md`         | `~/.gemini/lang_md.md`                 | symlink    |
+| `hooks/criteria/4_L2-trigger/hcl.md`              | `~/.gemini/lang_hcl.md`                | symlink    |
+| `hooks/criteria/4_L2-trigger/typescript.md`       | `~/.gemini/lang_ts.md`                 | symlink    |
+| `hooks/criteria/4_L2-trigger/ipynb.md`            | `~/.gemini/lang_ipynb.md`              | symlink    |
+| `hooks/criteria/4_L2-trigger/yaml.md`             | `~/.gemini/lang_yaml.md`               | symlink    |
+| `hooks/criteria/4_L2-trigger/golang.md`           | `~/.gemini/lang_go.md`                 | symlink    |
+| `rules`                                           | `~/.grok/rules`                        | symlink    |
+| `skills`                                          | `~/.grok/skills`                       | symlink    |
+| `hooks/criteria/2_context/scenarios/languages.md` | `~/.cursor/rules/lang-<id>.mdc`        | cursor-mdc |
+
+Cursor `.mdc` files render dynamically from each record declared in `languages.md`. File copies utilize atomic replacement via temporary files to eliminate incomplete read windows.

@@ -95,8 +95,8 @@ def resolve_state_directory() -> Path:
     """Return the session marker tree for this materialized adapter."""
     if STATE_DIR is not None:
         return STATE_DIR
-    label = "cursor" if is_cursor_runtime() else "claude"
-    return Path(f"/tmp/{label}-gate-state-{os.getuid()}")
+    harness = "cursor" if is_cursor_harness() else "claude"
+    return Path(f"/tmp/{harness}-gate-state-{os.getuid()}")
 
 
 def resolve_marker_path(session_id: str, scenario_id: str) -> Path:
@@ -117,19 +117,28 @@ def record_surfaced_scenario(session_id: str, scenario_id: str) -> None:
     path.touch(mode=0o600, exist_ok=True)
 
 
-def extract_latest_user_prompt(transcript_path: str) -> str:
-    """Extract and aggregate all user-attributable text within the turn."""
+def load_transcript_events(transcript_path: str) -> list[dict]:
+    """Load JSON objects from a Claude Code transcript file."""
     if not transcript_path:
-        return ""
+        return []
     path = Path(transcript_path)
     if not path.is_file():
-        return ""
-    buffer: list[str] = []
+        return []
+    events: list[dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def extract_latest_user_prompt(events: list[dict]) -> str:
+    """Extract and aggregate all user-attributable text within the turn."""
+    buffer: list[str] = []
+    for event in events:
         if event.get("type") != "user":
             continue
         message = event.get("message", {})
@@ -143,7 +152,7 @@ def extract_latest_user_prompt(transcript_path: str) -> str:
             isinstance(b, dict) and b.get("type") != "tool_result"
             for b in content
         )
-        piece = "".join(_block_text(block) for block in content)
+        piece = "".join(_extract_block_text(block) for block in content)
         if has_real_text:
             buffer = [piece]
         else:
@@ -151,7 +160,7 @@ def extract_latest_user_prompt(transcript_path: str) -> str:
     return "".join(buffer)
 
 
-def _block_text(block) -> str:
+def _extract_block_text(block) -> str:
     if not isinstance(block, dict):
         return ""
     if block.get("type") == "tool_result":
@@ -159,19 +168,19 @@ def _block_text(block) -> str:
         if isinstance(inner, str):
             return inner
         if isinstance(inner, list):
-            return "".join(_block_text(b) for b in inner)
+            return "".join(_extract_block_text(b) for b in inner)
         return ""
     return block.get("text", "")
 
 
-def is_cursor_runtime() -> bool:
+def is_cursor_harness() -> bool:
     """Return True when this file lives under a Cursor hooks directory."""
     return "/.cursor/" in Path(__file__).resolve().as_posix()
 
 
 def deny(reason: str, additional_context: str | None = None) -> NoReturn:
     """Emit a PreToolUse deny decision and exit."""
-    if is_cursor_runtime():
+    if is_cursor_harness():
         message = reason
         if additional_context:
             message = reason + "\n\n" + additional_context
@@ -200,7 +209,7 @@ def deny(reason: str, additional_context: str | None = None) -> NoReturn:
 
 def allow() -> NoReturn:
     """Emit a PreToolUse allow decision and exit."""
-    if is_cursor_runtime():
+    if is_cursor_harness():
         print(json.dumps({"permission": "allow"}))
         sys.exit(0)
     payload = {
@@ -213,21 +222,7 @@ def allow() -> NoReturn:
     sys.exit(0)
 
 
-def ask(reason: str) -> NoReturn:
-    """Emit Cursor native ask. Claude Code never takes this path."""
-    print(
-        json.dumps(
-            {
-                "permission": "ask",
-                "user_message": reason,
-                "agent_message": reason,
-            }
-        )
-    )
-    sys.exit(0)
-
-
-def _tool_name_has_marker(lowered: str, marker: str) -> bool:
+def _is_tool_name_marker(lowered: str, marker: str) -> bool:
     """True when marker is a tool-id token, not a prefix of a longer token."""
     if not marker:
         return False
@@ -256,11 +251,11 @@ def _tool_name_has_marker(lowered: str, marker: str) -> bool:
 
 def is_cursor_mcp_external_write(tool_name: str) -> bool:
     """Return True for Cursor MCP tools which mutate GitLab or GitHub state."""
-    if not is_cursor_runtime():
+    if not is_cursor_harness():
         return False
     lowered = tool_name.lower()
     return any(
-        _tool_name_has_marker(lowered, marker)
+        _is_tool_name_marker(lowered, marker)
         for marker in CURSOR_MCP_WRITE_MARKERS
     )
 
@@ -298,19 +293,27 @@ def intercept_edit_write(payload: dict, scenarios: list[dict]) -> None:
     enforce_scenario_context_injection(session_id, meta)
 
 
+def deny_cursor_external_write(reason: str) -> NoReturn:
+    """Deny a Cursor external execute act without a readable native signal."""
+    deny(
+        f"external-write.md: {reason} requires a Cursor native authorization "
+        "signal which PreToolUse can read. AskQuestion selections and "
+        "AskUserQuestion results are not that signal. Do not invoke "
+        "AskQuestion. Do not retry this call as a substitute."
+    )
+
+
 def require_exec_phrase(payload: dict, reason: str) -> None:
-    """Cursor ask covers PreToolUse without an AskUserQuestion transcript."""
-    prompt_text = extract_latest_user_prompt(payload.get("transcript_path", ""))
+    """Authorize an external execute act on a runtime-specific path."""
+    if is_cursor_harness():
+        deny_cursor_external_write(reason)
+    events = load_transcript_events(payload.get("transcript_path") or "")
+    prompt_text = extract_latest_user_prompt(events)
     if any(phrase in prompt_text for phrase in EXEC_PHRASES):
         return
-    message = (
-        f"external-write.md: {reason} requires explicit execution "
-        "authorization in the current user turn."
-    )
-    if is_cursor_runtime():
-        ask(message + " Approve this tool call in the Cursor permission card.")
     deny(
-        message + " Call AskUserQuestion now "
+        f"external-write.md: {reason} requires explicit execution "
+        "authorization in the current user turn. Call AskUserQuestion now "
         "with an option whose label is exactly Approve "
         "(plus a Deny option), state what will run and that it is "
         "irreversible if applicable, then retry this call after the "

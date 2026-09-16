@@ -84,7 +84,7 @@ def parse_languages_entries(path: Path) -> list[dict]:
     current: dict | None = None
     in_load = False
 
-    def _flush():
+    def _record_current_entry():
         nonlocal current, in_load
         if current and current.get("id"):
             entries.append(current)
@@ -96,7 +96,7 @@ def parse_languages_entries(path: Path) -> list[dict]:
         if not stripped:
             continue
         if stripped.startswith("- id:"):
-            _flush()
+            _record_current_entry()
             entry_id = stripped.split(":", 1)[1].strip()
             current = {
                 "id": entry_id,
@@ -123,7 +123,7 @@ def parse_languages_entries(path: Path) -> list[dict]:
         if not stripped.startswith("- "):
             in_load = False
 
-    _flush()
+    _record_current_entry()
     return entries
 
 

@@ -10,7 +10,7 @@ from typing import Any
 from engineering_principles.config import OLD_TEXT_MAX_BYTES
 
 
-def norm_event(payload: dict[str, Any]) -> str:
+def normalize_event(payload: dict[str, Any]) -> str:
     """Return a lowercase event name with non-letters stripped."""
     raw = (
         os.environ.get("GROK_HOOK_EVENT")
@@ -21,19 +21,19 @@ def norm_event(payload: dict[str, Any]) -> str:
     return re.sub(r"[^a-z]", "", str(raw).lower())
 
 
-def norm_tool(payload: dict[str, Any]) -> str:
+def normalize_tool(payload: dict[str, Any]) -> str:
     """Return a lowercase tool name with non-letters stripped."""
     raw = payload.get("toolName") or payload.get("tool_name") or ""
     return re.sub(r"[^a-z]", "", str(raw).lower())
 
 
-def tool_input(payload: dict[str, Any]) -> dict[str, Any]:
+def extract_tool_input(payload: dict[str, Any]) -> dict[str, Any]:
     """Return the tool input object, or an empty dict."""
     value = payload.get("toolInput") or payload.get("tool_input") or {}
     return value if isinstance(value, dict) else {}
 
 
-def prompt_text(payload: dict[str, Any]) -> str:
+def extract_prompt_text(payload: dict[str, Any]) -> str:
     """Return the owner prompt text when present."""
     for key in ("prompt", "userPrompt", "user_prompt", "text"):
         value = payload.get(key)
@@ -42,7 +42,7 @@ def prompt_text(payload: dict[str, Any]) -> str:
     return ""
 
 
-def file_path(tool_input_data: dict[str, Any]) -> str:
+def extract_file_path(tool_input_data: dict[str, Any]) -> str:
     """Return the target path from a tool input object."""
     for key in ("file_path", "target_file", "path", "notebook_path"):
         value = tool_input_data.get(key)
@@ -51,7 +51,7 @@ def file_path(tool_input_data: dict[str, Any]) -> str:
     return ""
 
 
-def new_text(tool_input_data: dict[str, Any]) -> str:
+def extract_new_text(tool_input_data: dict[str, Any]) -> str:
     """Return concatenated text that the tool is about to write."""
     chunks: list[str] = []
     for key in ("content", "contents", "new_string", "command"):
@@ -61,7 +61,7 @@ def new_text(tool_input_data: dict[str, Any]) -> str:
     return "\n".join(chunks)
 
 
-def old_text(tool_input_data: dict[str, Any], path: str) -> str:
+def load_old_text(tool_input_data: dict[str, Any], path: str) -> str:
     """Return prior file text, or empty when missing or oversized."""
     value = tool_input_data.get("old_string")
     if isinstance(value, str) and value:
@@ -79,7 +79,7 @@ def old_text(tool_input_data: dict[str, Any], path: str) -> str:
         return ""
 
 
-def command(tool_input_data: dict[str, Any]) -> str:
+def extract_command(tool_input_data: dict[str, Any]) -> str:
     """Return a shell command string from tool input aliases."""
     for key in ("command", "cmd", "shell_command", "script"):
         value = tool_input_data.get(key)

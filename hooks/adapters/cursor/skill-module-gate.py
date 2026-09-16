@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 
-def _hooks_root() -> Path:
+def _resolve_hooks_root() -> Path:
     """Return the Grok hooks tree that holds engineering_principles."""
     home = Path.home()
     grok = home / ".grok" / "hooks"
@@ -17,19 +17,19 @@ def _hooks_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-_HOOKS = _hooks_root()
+_HOOKS = _resolve_hooks_root()
 if str(_HOOKS) not in sys.path:
     sys.path.insert(0, str(_HOOKS))
 
 from engineering_principles.module_stateless import (  # noqa: E402
-    is_skill_module_path,
+    find_module_stateless_reason,
 )
 from engineering_principles.module_stateless import (  # noqa: E402
-    module_stateless_reason,
+    is_skill_module_path,
 )
 
 
-def _path_and_text(payload: dict) -> tuple[str, str]:
+def _extract_path_and_text(payload: dict) -> tuple[str, str]:
     tool_input = payload.get("tool_input") or payload.get("arguments") or {}
     if not isinstance(tool_input, dict):
         tool_input = {}
@@ -56,11 +56,11 @@ def main() -> None:
     except (json.JSONDecodeError, ValueError):
         print(json.dumps({"permission": "allow"}))
         return
-    path, text = _path_and_text(payload)
+    path, text = _extract_path_and_text(payload)
     if not path or not is_skill_module_path(path):
         print(json.dumps({"permission": "allow"}))
         return
-    reason = module_stateless_reason(path, text)
+    reason = find_module_stateless_reason(path, text)
     if reason:
         print(
             json.dumps(

@@ -22,7 +22,7 @@ class CursorScenario:
     load: tuple[str, ...]
 
 
-def frontmatter(text: str) -> str | None:
+def extract_frontmatter(text: str) -> str | None:
     """Return YAML between the opening fences, or None."""
     if not text.startswith("---\n"):
         return None
@@ -51,7 +51,7 @@ def _load_entries(block: str) -> tuple[str, ...]:
     return tuple(items)
 
 
-def _cursor_globs(block: str) -> str | None:
+def _extract_cursor_globs(block: str) -> str | None:
     """Return globs when a cursor adapter key exists, or None when absent."""
     match = _CURSOR_KEY.search(block)
     if match is None:
@@ -76,10 +76,10 @@ def _cursor_globs(block: str) -> str | None:
 
 def parse_cursor_scenario(text: str) -> CursorScenario | None:
     """Return Cursor fields when adapters.cursor is present."""
-    raw = frontmatter(text)
+    raw = extract_frontmatter(text)
     if raw is None:
         return None
-    globs = _cursor_globs(raw)
+    globs = _extract_cursor_globs(raw)
     if globs is None:
         return None
     ident = _ID.search(raw)
@@ -97,7 +97,7 @@ def parse_cursor_scenario(text: str) -> CursorScenario | None:
 
 def parse_languages_scenarios(text: str) -> list[CursorScenario]:
     """Parse Cursor scenarios from languages.md entries."""
-    raw = frontmatter(text)
+    raw = extract_frontmatter(text)
     if raw is None or "entries:" not in raw:
         return []
     entries: list[CursorScenario] = []
@@ -106,7 +106,7 @@ def parse_languages_scenarios(text: str) -> list[CursorScenario]:
     current_load: list[str] = []
     in_load = False
 
-    def _flush():
+    def _record_current_entry():
         nonlocal current_id, current_globs, current_load, in_load
         if current_id and current_globs and current_load:
             entries.append(
@@ -126,7 +126,7 @@ def parse_languages_scenarios(text: str) -> list[CursorScenario]:
         if not stripped:
             continue
         if stripped.startswith("- id:"):
-            _flush()
+            _record_current_entry()
             current_id = stripped.split(":", 1)[1].strip()
             continue
         if stripped.startswith("cursor_globs:"):
@@ -143,14 +143,14 @@ def parse_languages_scenarios(text: str) -> list[CursorScenario]:
         if _KEY_LINE.match(stripped) and not stripped.startswith("- "):
             in_load = False
 
-    _flush()
+    _record_current_entry()
     return entries
 
 
 LANGUAGES_REL = "hooks/criteria/2_context/scenarios/languages.md"
 
 
-def iter_cursor_scenarios(
+def load_cursor_scenarios(
     grok_root: Path,
 ) -> tuple[tuple[str, CursorScenario], ...]:
     """Load Cursor fields from the language dispatch table only."""

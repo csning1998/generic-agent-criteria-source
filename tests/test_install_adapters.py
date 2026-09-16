@@ -9,14 +9,14 @@ import pytest
 from adapter_install.install import MODE_COPY
 from adapter_install.install import SPECS
 from adapter_install.install import AdapterSpec
-from adapter_install.install import _remove_replaceable_tree
-from adapter_install.install import execute_apply
-from adapter_install.install import execute_check
-from adapter_install.install import infer_grok_root
+from adapter_install.install import _clear_replaceable_tree
+from adapter_install.install import inspect_all_specs
 from adapter_install.install import inspect_spec_drift
 from adapter_install.install import main
+from adapter_install.install import reconcile_all_specs
 from adapter_install.install import reconcile_spec
 from adapter_install.install import resolve_dest
+from adapter_install.install import resolve_grok_root
 from adapter_install.install import resolve_source
 from adapter_install.install import validate_dest_rel
 
@@ -25,9 +25,9 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def test_infer_grok_root_is_repo() -> None:
+def test_resolve_grok_root_is_repo() -> None:
     """Package layout places grok root two parents above install.py."""
-    assert infer_grok_root() == _repo_root()
+    assert resolve_grok_root() == _repo_root()
 
 
 def test_validate_dest_rejects_escape() -> None:
@@ -58,7 +58,7 @@ def test_specs_sources_exist() -> None:
 
 def test_check_empty_home_is_drift(tmp_path: Path) -> None:
     """An empty home reports missing for every dest."""
-    code = execute_check(_repo_root(), tmp_path)
+    code = inspect_all_specs(_repo_root(), tmp_path)
     assert code == 1
     for spec in SPECS:
         assert inspect_spec_drift(_repo_root(), tmp_path, spec) == "missing"
@@ -68,8 +68,8 @@ def test_apply_then_check_clean(tmp_path: Path) -> None:
     """Apply writes allow-listed dests. A second check is clean."""
     home = tmp_path / "home"
     home.mkdir()
-    assert execute_apply(_repo_root(), home) == 0
-    assert execute_check(_repo_root(), home) == 0
+    assert reconcile_all_specs(_repo_root(), home) == 0
+    assert inspect_all_specs(_repo_root(), home) == 0
     agents = home / ".agents" / "AGENTS.md"
     assert agents.is_symlink()
     assert (
@@ -109,11 +109,11 @@ def test_reconcile_spec_with_identical_regular_file_replaces_with_symlink(
     )
     spec = SPECS[0]
     assert inspect_spec_drift(_repo_root(), home, spec) == "regular-same"
-    assert execute_apply(_repo_root(), home) == 0
+    assert reconcile_all_specs(_repo_root(), home) == 0
     assert dest.is_symlink()
 
 
-def test_execute_apply_with_divergent_regular_file_aborts_without_mutation(
+def test_reconcile_all_specs_divergent_regular_file_aborts_without_mutation(
     tmp_path: Path,
 ) -> None:
     """Apply must not overwrite a dest whose bytes differ."""
@@ -121,7 +121,7 @@ def test_execute_apply_with_divergent_regular_file_aborts_without_mutation(
     dest = home / ".agents" / "AGENTS.md"
     dest.parent.mkdir(parents=True)
     dest.write_text("owner edit\n", encoding="utf-8")
-    assert execute_apply(_repo_root(), home) == 1
+    assert reconcile_all_specs(_repo_root(), home) == 1
     assert dest.read_text(encoding="utf-8") == "owner edit\n"
     assert not dest.is_symlink()
 
@@ -131,9 +131,9 @@ def test_reconcile_spec_with_divergent_file_aborts_without_overwrite(
 ) -> None:
     """`reconcile_spec` itself must refuse a divergent file dest.
 
-    `execute_apply` pre-screens every spec with `inspect_spec_drift` and
-    aborts the whole run before calling `reconcile_spec` at all.
-    `test_execute_apply_with_divergent_regular_file_aborts_without_mutation`
+    `reconcile_all_specs` pre-screens every spec with `inspect_spec_drift`
+    and aborts the whole run before calling `reconcile_spec` at all.
+    `test_reconcile_all_specs_divergent_regular_file_aborts_without_mutation`
     never exercises `reconcile_spec`'s own `regular-differs` handling.
     This test calls `reconcile_spec` directly to close that blind spot
     for the file case, mirroring the directory-dest case.
@@ -223,7 +223,7 @@ def test_remove_tree_does_not_follow_dir_symlink(tmp_path: Path) -> None:
     dest.mkdir()
     (dest / "SKILL.md").write_text("x\n", encoding="utf-8")
     (dest / "escape").symlink_to(victim)
-    _remove_replaceable_tree(dest)
+    _clear_replaceable_tree(dest)
     assert not dest.exists()
     assert marker.is_file()
     assert marker.read_text(encoding="utf-8") == "keep\n"
@@ -236,7 +236,7 @@ def test_symlink_home_component_aborts(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     (home / ".claude").symlink_to(outside)
-    assert execute_apply(_repo_root(), home) == 1
+    assert reconcile_all_specs(_repo_root(), home) == 1
     assert not (outside / "CLAUDE.md").exists()
     assert not (home / ".agents" / "AGENTS.md").exists()
 
@@ -245,7 +245,7 @@ def test_apply_leaves_no_tmp_file_behind(tmp_path: Path) -> None:
     """A successful copy-mode apply leaves no `.name.tmp*` sibling."""
     home = tmp_path / "home"
     home.mkdir()
-    assert execute_apply(_repo_root(), home) == 0
+    assert reconcile_all_specs(_repo_root(), home) == 0
     hooks_dir = home / ".claude" / "hooks"
     leaked = [p for p in hooks_dir.iterdir() if ".tmp" in p.name]
     assert leaked == []

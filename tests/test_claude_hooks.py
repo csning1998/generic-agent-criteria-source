@@ -142,7 +142,7 @@ def test_main_returns_silently_on_empty_stdin(monkeypatch, capsys) -> None:
     assert capsys.readouterr().out == ""
 
 
-def test_ensure_private_dir_replaces_preexisting_symlink(tmp_path) -> None:
+def test_provision_private_dir_replaces_preexisting_symlink(tmp_path) -> None:
     """Regression for !16.
 
     A pre-planted symlink at the state path must not be written
@@ -152,7 +152,7 @@ def test_ensure_private_dir_replaces_preexisting_symlink(tmp_path) -> None:
     victim.mkdir()
     target = tmp_path / "state"
     target.symlink_to(victim)
-    post_write_review._ensure_private_dir(target)
+    post_write_review._provision_private_dir(target)
     assert target.is_dir()
     assert not target.is_symlink()
     assert oct(target.stat().st_mode & 0o777) == "0o700"
@@ -653,10 +653,10 @@ def test_require_exec_phrase_denies_when_phrase_absent(capsys) -> None:
     )
 
 
-def test_require_exec_phrase_asks_under_cursor_runtime(
+def test_require_exec_phrase_denies_under_cursor_harness(
     monkeypatch, capsys
 ) -> None:
-    """Cursor: absent phrase asks via the native permission card."""
+    """Cursor: absent native signal denies without AskUserQuestion."""
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.cursor/hooks/gate-check.py"
     )
@@ -664,7 +664,9 @@ def test_require_exec_phrase_asks_under_cursor_runtime(
     with pytest.raises(SystemExit):
         gate_check.require_exec_phrase(payload, "'git push'")
     out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "ask"
+    assert out["permission"] == "deny"
+    assert "Call AskUserQuestion" not in out["user_message"]
+    assert "Do not invoke AskQuestion" in out["user_message"]
 
 
 # intercept_bash: hard-deny list, external-write allowlist,
@@ -781,7 +783,7 @@ def test_normalize_payload_prefers_claude_native_fields() -> None:
     assert normalized["tool_input"]["file_path"] == "/tmp/y.py"
 
 
-def test_is_cursor_mcp_external_write_requires_cursor_runtime(
+def test_is_cursor_mcp_external_write_requires_cursor_harness(
     monkeypatch,
 ) -> None:
     """The MCP-write marker match only applies under the Cursor adapter."""

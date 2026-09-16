@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pytest
 from engineering_principles.config import OLD_TEXT_MAX_BYTES
-from engineering_principles.dispatch import handle_pre_tool_use
-from engineering_principles.dispatch import handle_session_start
-from engineering_principles.dispatch import handle_user_prompt
-from engineering_principles.evaluate import apply_leave
-from engineering_principles.evaluate import evaluate_write
+from engineering_principles.dispatch import intercept_pre_tool_use
+from engineering_principles.dispatch import intercept_session_start
+from engineering_principles.dispatch import intercept_user_prompt
+from engineering_principles.evaluate import find_write_deny_reason
+from engineering_principles.evaluate import record_leave
 from engineering_principles.evaluate import record_read
-from engineering_principles.payload import command
-from engineering_principles.payload import old_text
-from engineering_principles.state import session_id
+from engineering_principles.payload import extract_command
+from engineering_principles.payload import load_old_text
+from engineering_principles.state import extract_session_id
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def _layer_path(tmp_path: Path) -> str:
 def test_generic_module_denied_without_leave(workspace: Path) -> None:
     """Shared modules need owner leave before a write."""
     payload = _payload(workspace)
-    reason = evaluate_write(
+    reason = find_write_deny_reason(
         payload, _module_path(workspace), "variable x {}", ""
     )
     assert reason is not None
@@ -77,22 +77,22 @@ def test_generic_leave_still_blocks_product_and_vault(
 ) -> None:
     """Leave does not permit product names or vault.production."""
     payload = _payload(workspace)
-    apply_leave(payload, "leave generic module")
+    record_leave(payload, "leave generic module")
     module_path = _module_path(workspace)
     assert "cannot name a product" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload, module_path, 'name = "harbor-origin/frontend"\n', ""
         )
         or ""
     )
     assert "vault.production" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload, module_path, "provider = vault.production\n", ""
         )
         or ""
     )
     assert "Tautological" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             module_path,
             "providers = { vault = vault }\n",
@@ -107,16 +107,16 @@ def test_generic_write_needs_architecture_then_allows(
 ) -> None:
     """A clean generic write still needs planning reads first."""
     payload = _payload(workspace)
-    apply_leave(payload, "leave generic module")
+    record_leave(payload, "leave generic module")
     module_path = _module_path(workspace)
     body = 'resource "vault_kv_secret_v2" "this" {}\n'
     assert "Architecture gate" in (
-        evaluate_write(payload, module_path, body, "") or ""
+        find_write_deny_reason(payload, module_path, body, "") or ""
     )
     planning = workspace / "planning"
     record_read(payload, str(planning / "decisions.md"))
     record_read(payload, str(planning / "architecture.md"))
-    assert evaluate_write(payload, module_path, body, "") is None
+    assert find_write_deny_reason(payload, module_path, body, "") is None
 
 
 def test_consumer_secret_and_mint_layer(workspace: Path) -> None:
@@ -131,13 +131,13 @@ def test_consumer_secret_and_mint_layer(workspace: Path) -> None:
         / "meta-platform/terraform/layers/foundation-vault-bastion/main.tf"
     )
     assert "Secret ownership" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload, layer_path, 'resource "random_password" "db" {}\n', ""
         )
         or ""
     )
     assert "Secret ownership" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             layer_path,
             'source = "../../modules/vault-provisioning/vault-credential"\n',
@@ -146,7 +146,7 @@ def test_consumer_secret_and_mint_layer(workspace: Path) -> None:
         or ""
     )
     assert (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             mint_path,
             'source = "../../modules/vault-provisioning/vault-credential"\n',
@@ -160,25 +160,31 @@ def test_guest_debug_and_readonly_commands(workspace: Path) -> None:
     """Read-only guest psql is allowed. Mutating SQL needs leave."""
     payload = _payload(workspace)
     sql = "ssh harbor psql -c 'ALTER USER postgres PASSWORD foo'"
-    assert "Section 3 Item A.5" in (evaluate_write(payload, "", "", sql) or "")
-    assert evaluate_write(payload, "", "", "rg -n psql ansible/roles") is None
+    assert "Section 3 Item A.5" in (
+        find_write_deny_reason(payload, "", "", sql) or ""
+    )
     assert (
-        evaluate_write(
+        find_write_deny_reason(payload, "", "", "rg -n psql ansible/roles")
+        is None
+    )
+    assert (
+        find_write_deny_reason(
             payload, "", "", "git commit -m 'document ALTER USER flow'"
         )
         is None
     )
     assert (
-        evaluate_write(payload, "", "", "ssh dbhost psql -c 'select 1'") is None
+        find_write_deny_reason(payload, "", "", "ssh dbhost psql -c 'select 1'")
+        is None
     )
     assert "Section 3 Item A.5" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload, "", "", "psql -c 'ALTER USER postgres PASSWORD foo'"
         )
         or ""
     )
-    apply_leave(payload, "allow guest sql")
-    assert evaluate_write(payload, "", "", sql) is None
+    record_leave(payload, "allow guest sql")
+    assert find_write_deny_reason(payload, "", "", sql) is None
 
 
 def test_legacy_harbor_origin_name_gate(workspace: Path) -> None:
@@ -200,15 +206,18 @@ def test_legacy_harbor_origin_name_gate(workspace: Path) -> None:
         workspace / "meta-platform/terraform/layers/new-harbor-origin/main.tf"
     )
     assert "Name gate" in (
-        evaluate_write(payload, new_bootstrapper, "locals {}\n", "") or ""
+        find_write_deny_reason(payload, new_bootstrapper, "locals {}\n", "")
+        or ""
     )
     assert (
-        evaluate_write(
+        find_write_deny_reason(
             payload, str(origin_layer / "data.tf"), "locals {}\n", ""
         )
         is None
     )
-    assert evaluate_write(payload, new_origin, "locals {}\n", "") is None
+    assert (
+        find_write_deny_reason(payload, new_origin, "locals {}\n", "") is None
+    )
 
 
 def test_ansible_and_iac_sql(workspace: Path) -> None:
@@ -225,7 +234,7 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
     existing = "- name: already present\n  ansible.builtin.shell: echo hi\n"
     play.write_text(existing, encoding="utf-8")
     assert (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             str(play),
             existing + "- name: comment only\n  debug: msg=x\n",
@@ -235,7 +244,7 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
         is None
     )
     assert "Section 3 Item A.5" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             str(play),
             existing + "- ansible.builtin.shell: wipe\n",
@@ -245,7 +254,7 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
         or ""
     )
     assert "Section 3 Item A.5" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             str(
                 workspace / "meta-platform/ansible/roles/platform_harbor/tasks/"
@@ -257,7 +266,7 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
         or ""
     )
     assert "Section 3 Item A.5" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             _layer_path(workspace),
             'locals { cmd = "ssh dbhost psql -c select 1" }\n',
@@ -267,7 +276,7 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
     )
     script = str(workspace / "meta-platform/scripts/fix-db.sh")
     assert "Section 3 Item A.5" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             script,
             "psql -c 'ALTER USER postgres PASSWORD foo'\n",
@@ -276,7 +285,7 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
         or ""
     )
     assert (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             str(workspace / "meta-platform/scripts/probe.sh"),
             "psql -c 'select 1'\n",
@@ -293,9 +302,9 @@ def test_uncovered_repo_and_lockfile(workspace: Path) -> None:
     record_read(payload, str(planning / "decisions.md"))
     record_read(payload, str(planning / "architecture.md"))
     fullstack = str(workspace / "personal/app-content-matter/terraform/main.tf")
-    assert evaluate_write(payload, fullstack, "locals {}\n", "") is None
+    assert find_write_deny_reason(payload, fullstack, "locals {}\n", "") is None
     assert (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             _layer_path(workspace),
             'image = "goharbor/harbor-core:v2.13.1"\n',
@@ -304,7 +313,10 @@ def test_uncovered_repo_and_lockfile(workspace: Path) -> None:
         is None
     )
     lock_path = str(workspace / "meta-platform/terraform/.terraform.lock.hcl")
-    assert evaluate_write(payload, lock_path, "provider hashes\n", "") is None
+    assert (
+        find_write_deny_reason(payload, lock_path, "provider hashes\n", "")
+        is None
+    )
 
 
 def test_architecture_gate_on_fresh_session(
@@ -314,10 +326,11 @@ def test_architecture_gate_on_fresh_session(
     monkeypatch.setenv("GROK_SESSION_ID", "fresh-session")
     fresh = _payload(workspace, session="fresh-session")
     assert "Architecture gate" in (
-        evaluate_write(fresh, _layer_path(workspace), "locals {}\n", "") or ""
+        find_write_deny_reason(fresh, _layer_path(workspace), "locals {}\n", "")
+        or ""
     )
     fullstack = str(workspace / "personal/app-content-matter/terraform/main.tf")
-    assert evaluate_write(fresh, fullstack, "locals {}\n", "") is None
+    assert find_write_deny_reason(fresh, fullstack, "locals {}\n", "") is None
 
 
 def test_dispatch_generic_deny_and_silent_hooks(
@@ -339,7 +352,7 @@ def test_dispatch_generic_deny_and_silent_hooks(
     }
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(deny_payload)
+        code = intercept_pre_tool_use(deny_payload)
     assert code == 2
     assert "Generic module" in buf.getvalue()
 
@@ -352,12 +365,12 @@ def test_dispatch_generic_deny_and_silent_hooks(
     }
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_user_prompt(prompt_payload)
+        code = intercept_user_prompt(prompt_payload)
     assert code == 0
     assert buf.getvalue().strip() == ""
     buf = StringIO()
     with redirect_stdout(buf):
-        handle_user_prompt(
+        intercept_user_prompt(
             {**prompt_payload, "prompt": "How is the weather today"}
         )
     assert buf.getvalue().strip() == ""
@@ -370,7 +383,7 @@ def test_dispatch_generic_deny_and_silent_hooks(
     }
     buf = StringIO()
     with redirect_stdout(buf):
-        handle_session_start(start_payload)
+        intercept_session_start(start_payload)
     assert buf.getvalue().strip() == ""
 
 
@@ -380,7 +393,7 @@ def test_scoped_leave_and_local_exec(
     """Named leave does not cover another module. local-exec is denied."""
     monkeypatch.setenv("GROK_SESSION_ID", "scope-session")
     payload = _payload(workspace, session="scope-session")
-    apply_leave(payload, "leave generic module vault-credential")
+    record_leave(payload, "leave generic module vault-credential")
     planning = workspace / "planning"
     record_read(payload, str(planning / "decisions.md"))
     record_read(payload, str(planning / "architecture.md"))
@@ -389,10 +402,10 @@ def test_scoped_leave_and_local_exec(
         / "meta-platform/terraform/modules/kvm-foundation-resources/main.tf"
     )
     assert "Section 3 Item A.2" in (
-        evaluate_write(payload, other, "locals {}\n", "") or ""
+        find_write_deny_reason(payload, other, "locals {}\n", "") or ""
     )
     assert "Section 3 Item A.5" in (
-        evaluate_write(
+        find_write_deny_reason(
             payload,
             _layer_path(workspace),
             'provisioner "local-exec" { command = "true" }\n',
@@ -402,12 +415,12 @@ def test_scoped_leave_and_local_exec(
     )
 
 
-def test_old_text_cap_and_command_alias(workspace: Path) -> None:
+def test_load_old_text_cap_and_extract_command_alias(workspace: Path) -> None:
     """Oversized files yield empty old text. cmd is a command alias."""
     huge = workspace / "huge-old.txt"
     huge.write_bytes(b"x" * (OLD_TEXT_MAX_BYTES + 1))
-    assert old_text({}, str(huge)) == ""
-    assert "psql" in command({"cmd": "ssh harbor psql -c 'select 1'"})
+    assert load_old_text({}, str(huge)) == ""
+    assert "psql" in extract_command({"cmd": "ssh harbor psql -c 'select 1'"})
 
 
 def test_missing_session_does_not_leak_leave(
@@ -416,8 +429,8 @@ def test_missing_session_does_not_leak_leave(
     """Ephemeral sessions do not share leave state."""
     monkeypatch.delenv("GROK_SESSION_ID", raising=False)
     bare = {"workspaceRoot": str(workspace), "cwd": str(workspace)}
-    first_id = session_id(bare)
-    second_id = session_id(bare)
+    first_id = extract_session_id(bare)
+    second_id = extract_session_id(bare)
     assert first_id != second_id
     assert first_id != "unknown"
     assert second_id != "unknown"
@@ -426,14 +439,14 @@ def test_missing_session_does_not_leak_leave(
         "workspaceRoot": str(workspace),
         "cwd": str(workspace),
     }
-    apply_leave(leave_payload, "leave generic module")
+    record_leave(leave_payload, "leave generic module")
     other_payload = {
         "hookEventName": "PreToolUse",
         "workspaceRoot": str(workspace),
         "cwd": str(workspace),
     }
     assert "Generic module" in (
-        evaluate_write(
+        find_write_deny_reason(
             other_payload, _module_path(workspace), "variable x {}", ""
         )
         or ""

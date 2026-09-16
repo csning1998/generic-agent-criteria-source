@@ -12,7 +12,7 @@ from engineering_principles.config import GOVERNED_DIR_PARTS
 from engineering_principles.config import SECRET_MINT_LAYER_RE
 
 
-def posix(path: str) -> str:
+def normalize_posix(path: str) -> str:
     """Normalize separators to POSIX slashes."""
     return path.replace("\\", "/")
 
@@ -26,29 +26,29 @@ def is_self_path(path: str) -> bool:
 
 def is_governed_path(path: str) -> bool:
     """Return True when a path component is a governed tree name."""
-    parts = Path(posix(path)).parts
+    parts = Path(normalize_posix(path)).parts
     return any(part in GOVERNED_DIR_PARTS for part in parts)
 
 
 def is_iac_path(path: str) -> bool:
     """Return True when a path component is terraform, ansible, or packer."""
-    parts = Path(posix(path)).parts
+    parts = Path(normalize_posix(path)).parts
     return any(part in ("terraform", "ansible", "packer") for part in parts)
 
 
 def is_ansible_path(path: str) -> bool:
     """Return True when a path component is ansible."""
-    return "ansible" in Path(posix(path)).parts
+    return "ansible" in Path(normalize_posix(path)).parts
 
 
 def is_generic_module(path: str) -> bool:
     """Return True for shared Terraform modules or utils_* roles."""
-    return bool(GENERIC_MODULE_RE.search(posix(path)))
+    return bool(GENERIC_MODULE_RE.search(normalize_posix(path)))
 
 
 def is_secret_mint_layer(path: str) -> bool:
     """Return True for vault, credential, pki, identity, or approle layers."""
-    posix_path = posix(path)
+    posix_path = normalize_posix(path)
     if "/terraform/layers/" not in posix_path:
         return False
     return bool(SECRET_MINT_LAYER_RE.search(posix_path))
@@ -56,16 +56,16 @@ def is_secret_mint_layer(path: str) -> bool:
 
 def is_consumer_layer(path: str) -> bool:
     """Return True for a Terraform layer that must not mint secrets."""
-    posix_path = posix(path)
+    posix_path = normalize_posix(path)
     if "/terraform/layers/" not in posix_path:
         return False
     return not is_secret_mint_layer(posix_path)
 
 
-def introduces_bootstrapper_name(path: str) -> bool:
+def is_introduced_bootstrapper_name(path: str) -> bool:
     """Return True when a new path still uses the bootstrapper token."""
     candidate = Path(path).expanduser()
-    if not BOOTSTRAPPER_NAME_RE.search(posix(str(candidate))):
+    if not BOOTSTRAPPER_NAME_RE.search(normalize_posix(str(candidate))):
         return False
     current = candidate
     while not current.exists() and current != current.parent:
@@ -98,7 +98,7 @@ def find_planning_root(start: Path) -> Path | None:
     return None
 
 
-def architecture_repo_tokens(planning: Path) -> list[str]:
+def load_architecture_repo_tokens(planning: Path) -> list[str]:
     """Return repo tokens encoded in architecture_*.md file names."""
     tokens: list[str] = []
     for item in planning.glob("architecture*.md"):
@@ -111,11 +111,11 @@ def architecture_repo_tokens(planning: Path) -> list[str]:
     return tokens
 
 
-def path_needs_planning_gate(path: str, planning: Path | None) -> bool:
+def is_planning_gate_required(path: str, planning: Path | None) -> bool:
     """Return True when a mutation needs planning reads first."""
     if planning is None or not path:
         return False
-    posix_path = posix(path)
+    posix_path = normalize_posix(path)
     try:
         resolved = Path(path).expanduser().resolve()
     except OSError:
@@ -130,7 +130,7 @@ def path_needs_planning_gate(path: str, planning: Path | None) -> bool:
             return True
     if not is_governed_path(posix_path):
         return False
-    tokens = architecture_repo_tokens(planning)
+    tokens = load_architecture_repo_tokens(planning)
     if not tokens:
         return True
     return any(token in posix_path for token in tokens)

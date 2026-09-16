@@ -11,8 +11,8 @@ from typing import Any
 from engineering_principles.config import OLD_TEXT_MAX_BYTES
 from engineering_principles.paths import is_self_path
 from engineering_principles.state import load_state
-from engineering_principles.state import save_state
-from engineering_principles.state import workspace_root
+from engineering_principles.state import persist_state
+from engineering_principles.state import resolve_workspace_root
 
 
 PLACEHOLDER_RE = re.compile(r"<[^>\n]+>")
@@ -71,12 +71,12 @@ def is_skill_module_path(path: str) -> bool:
     return "/skill-module-" in posix or posix.startswith("skill-module-")
 
 
-def _stripped(text: str) -> str:
+def _normalize_stripped(text: str) -> str:
     """Remove placeholder tokens so examples are not treated as state."""
     return PLACEHOLDER_RE.sub("", text)
 
 
-def _placeholder_only(value: object) -> bool:
+def _is_placeholder_only(value: object) -> bool:
     """Return True when JSON value is empty or only placeholder tokens."""
     if value is None:
         return True
@@ -90,15 +90,15 @@ def _placeholder_only(value: object) -> bool:
             key_ok = bool(PLACEHOLDER_TOKEN_RE.fullmatch(key_text)) or (
                 key_text in SCHEMA_KEYS
             )
-            if not key_ok or not _placeholder_only(item):
+            if not key_ok or not _is_placeholder_only(item):
                 return False
         return True
     if isinstance(value, list):
-        return all(_placeholder_only(item) for item in value)
+        return all(_is_placeholder_only(item) for item in value)
     return False
 
 
-def _iter_json_values(text: str) -> list[object]:
+def _extract_json_values(text: str) -> list[object]:
     """Return JSON objects and arrays decoded from the original text."""
     decoder = json.JSONDecoder()
     values: list[object] = []
@@ -126,30 +126,30 @@ def _is_path_rename(value: object) -> bool:
     return set(value) <= {"from", "to"}
 
 
-def _filled_table_hit(value: object) -> str | None:
+def _find_filled_table_hit(value: object) -> str | None:
     """Return a mapping-table label when a JSON value bakes table data."""
     if isinstance(value, dict):
         for key, item in value.items():
-            if key not in TABLE_KEYS or _placeholder_only(item):
+            if key not in TABLE_KEYS or _is_placeholder_only(item):
                 continue
             if key == "rename" and _is_path_rename(item):
                 continue
             return f"mapping table: {key}"
         for item in value.values():
-            hit = _filled_table_hit(item)
+            hit = _find_filled_table_hit(item)
             if hit:
                 return hit
     elif isinstance(value, list):
         for item in value:
-            hit = _filled_table_hit(item)
+            hit = _find_filled_table_hit(item)
             if hit:
                 return hit
     return None
 
 
-def first_stateful_hit(text: str) -> str | None:
+def find_first_stateful_hit(text: str) -> str | None:
     """Return a deny snippet when module text bakes workspace state."""
-    body = _stripped(text)
+    body = _normalize_stripped(text)
     for pattern, label in (
         (COLLECTION_UUID_RE, "collection UUID"),
         (HOME_PATH_RE, "absolute home path"),
@@ -161,14 +161,14 @@ def first_stateful_hit(text: str) -> str | None:
             return f"{label}: {match.group(0)}"
     # Placeholder strip turns {"<key>": "<label>"} into {"": ""}.
     # JSONDecoder walks objects in the original text.
-    for value in _iter_json_values(text):
-        hit = _filled_table_hit(value)
+    for value in _extract_json_values(text):
+        hit = _find_filled_table_hit(value)
         if hit:
             return hit
     return None
 
 
-def composed_module_text(
+def derive_composed_module_text(
     content: str,
     before: str,
     old_string: str,
@@ -184,22 +184,27 @@ def composed_module_text(
     return ""
 
 
-def _path_token(match: re.Match[str]) -> str:
+def _extract_path_token(match: re.Match[str]) -> str:
     """Return the captured path token from a PATH_TOKEN_RE match."""
     return match.group(1) or match.group(2) or match.group(3) or ""
 
 
-def _tokens(text: str) -> list[str]:
+def _extract_tokens(text: str) -> list[str]:
     """Return quoted or bare tokens from a shell fragment."""
-    return [_path_token(match) for match in PATH_TOKEN_RE.finditer(text or "")]
+    return [
+        _extract_path_token(match)
+        for match in PATH_TOKEN_RE.finditer(text or "")
+    ]
 
 
-def _sed_in_place(body: str) -> bool:
+def _has_sed_in_place(body: str) -> bool:
     """Return True when sed tokens include an -i flag."""
-    return any(item == "-i" or item.startswith("-i") for item in _tokens(body))
+    return any(
+        item == "-i" or item.startswith("-i") for item in _extract_tokens(body)
+    )
 
 
-def _shell_segments(command: str) -> list[str]:
+def _extract_shell_segments(command: str) -> list[str]:
     """Split a command on &&, ||, semicolons, and newlines."""
     return [
         part.strip()
@@ -208,21 +213,21 @@ def _shell_segments(command: str) -> list[str]:
     ]
 
 
-def _positional_args(tokens: list[str]) -> list[str]:
+def _extract_positional_args(tokens: list[str]) -> list[str]:
     """Return tokens after the command name, skipping short options."""
     return [item for item in tokens[1:] if not item.startswith("-")]
 
 
-def heredoc_bodies(command: str) -> list[str]:
+def extract_heredoc_bodies(command: str) -> list[str]:
     """Return heredoc bodies from a shell command."""
     return [match.group(3) for match in HEREDOC_RE.finditer(command or "")]
 
 
-def shell_write_payloads(command: str) -> list[str]:
+def extract_shell_write_payloads(command: str) -> list[str]:
     """Return text a shell write would put on disk."""
-    blobs = heredoc_bodies(command)
-    for segment in _shell_segments(command):
-        tokens = _tokens(segment)
+    blobs = extract_heredoc_bodies(command)
+    for segment in _extract_shell_segments(command):
+        tokens = _extract_tokens(segment)
         if not tokens:
             continue
         head = tokens[0]
@@ -234,27 +239,27 @@ def shell_write_payloads(command: str) -> list[str]:
             match = PRINTF_RE.search(segment)
             if match and match.group("body").strip():
                 blobs.append(match.group("body").strip())
-        elif head == "sed" and _sed_in_place(segment):
-            args = _positional_args(tokens)
+        elif head == "sed" and _has_sed_in_place(segment):
+            args = _extract_positional_args(tokens)
             if len(args) >= 2:
                 blobs.extend(args[:-1])
     return blobs
 
 
-def shell_write_targets(command: str) -> list[str]:
+def extract_shell_write_targets(command: str) -> list[str]:
     """Return skill-module destinations of redirect, tee, cp, mv, or sed -i."""
     raws: list[str] = []
     for match in WRITE_TARGET_RE.finditer(command or ""):
         raws.append(match.group(1) or match.group(2) or match.group(3) or "")
-    for segment in _shell_segments(command):
-        tokens = _tokens(segment)
+    for segment in _extract_shell_segments(command):
+        tokens = _extract_tokens(segment)
         if not tokens:
             continue
         head = tokens[0]
-        args = _positional_args(tokens)
+        args = _extract_positional_args(tokens)
         if head in {"cp", "mv"} and args:
             raws.append(args[-1])
-        elif head == "sed" and _sed_in_place(segment) and args:
+        elif head == "sed" and _has_sed_in_place(segment) and args:
             raws.append(args[-1])
     found: list[str] = []
     for raw in raws:
@@ -263,17 +268,17 @@ def shell_write_targets(command: str) -> list[str]:
     return found
 
 
-def module_stateless_reason(path: str, text: str) -> str | None:
+def find_module_stateless_reason(path: str, text: str) -> str | None:
     """Return a deny reason for a stateful skill-module write."""
     if not path or not is_skill_module_path(path):
         return None
-    hit = first_stateful_hit(text)
+    hit = find_first_stateful_hit(text)
     if hit is None:
         return None
     return DENY_MESSAGE.format(hit=hit)
 
 
-def _path_in_scope(path: str, workspace: str) -> bool:
+def _is_path_in_scope(path: str, workspace: str) -> bool:
     """Return True when a path sits under workspaceRoot or ~/.grok."""
     candidate = Path(path).expanduser()
     if workspace:
@@ -287,10 +292,10 @@ def _path_in_scope(path: str, workspace: str) -> bool:
     return is_self_path(str(candidate))
 
 
-def read_module_file(path: str, workspace: str = "") -> str:
+def load_module_file(path: str, workspace: str = "") -> str:
     """Return file text, or empty when missing, oversized, or out of scope."""
     candidate = Path(path).expanduser()
-    if workspace and not _path_in_scope(str(candidate), workspace):
+    if workspace and not _is_path_in_scope(str(candidate), workspace):
         return ""
     try:
         if not candidate.is_file():
@@ -323,7 +328,7 @@ def resolve_skill_module_paths(
     candidates: list[str] = []
     if path and is_skill_module_path(path):
         candidates.append(path)
-    candidates.extend(shell_write_targets(text or ""))
+    candidates.extend(extract_shell_write_targets(text or ""))
     for raw in candidates:
         candidate = Path(raw).expanduser()
         if not candidate.is_absolute():
@@ -331,7 +336,7 @@ def resolve_skill_module_paths(
         resolved = normalize_module_path(str(candidate))
         if resolved in found:
             continue
-        if workspace and not _path_in_scope(resolved, workspace):
+        if workspace and not _is_path_in_scope(resolved, workspace):
             continue
         if is_skill_module_path(resolved):
             found.append(resolved)
@@ -340,8 +345,8 @@ def resolve_skill_module_paths(
 
 def record_skill_module_write(payload: dict[str, Any], path: str) -> None:
     """Record a skill-module path written in this session."""
-    root = str(workspace_root(payload))
-    if not _path_in_scope(path, root):
+    root = str(resolve_workspace_root(payload))
+    if not _is_path_in_scope(path, root):
         return
     state = load_state(payload)
     writes = [str(item) for item in state.get("skill_module_writes", [])]
@@ -349,30 +354,30 @@ def record_skill_module_write(payload: dict[str, Any], path: str) -> None:
     if resolved not in writes:
         writes.append(resolved)
     state["skill_module_writes"] = writes
-    save_state(payload, state)
+    persist_state(payload, state)
 
 
-def dirty_skill_module_hits(
+def find_dirty_skill_module_hits(
     payload: dict[str, Any],
 ) -> list[tuple[str, str]]:
     """Return recorded skill-module paths that still bake state."""
     state = load_state(payload)
-    root = str(workspace_root(payload))
+    root = str(resolve_workspace_root(payload))
     hits: list[tuple[str, str]] = []
     for item in state.get("skill_module_writes") or []:
         path = str(item)
-        hit = first_stateful_hit(read_module_file(path, root))
+        hit = find_first_stateful_hit(load_module_file(path, root))
         if hit:
             hits.append((path, hit))
     return hits
 
 
-def stop_stateless_reason(payload: dict[str, Any]) -> str | None:
+def find_stop_stateless_reason(payload: dict[str, Any]) -> str | None:
     """Return a Stop block reason when a written module still has state."""
     reason_field = str(payload.get("reason") or "end_turn")
     if reason_field not in {"", "end_turn"}:
         return None
-    hits = dirty_skill_module_hits(payload)
+    hits = find_dirty_skill_module_hits(payload)
     if not hits:
         return None
     path, hit = hits[0]
@@ -384,7 +389,10 @@ def stop_stateless_reason(payload: dict[str, Any]) -> str | None:
 
 def emit_post_write_scan(path: str, workspace: str = "") -> None:
     """Write a disk-scan finding to stderr after a skill-module mutation."""
-    text = read_module_file(path, workspace)
-    reason = module_stateless_reason(path, text)
+    text = load_module_file(path, workspace)
+    reason = find_module_stateless_reason(path, text)
     if reason:
         sys.stderr.write(reason + "\n")
+
+
+module_stateless_reason = find_module_stateless_reason

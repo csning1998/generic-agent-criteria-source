@@ -9,8 +9,8 @@ load:
     - 3_register/304_Comment_Standards.md
     - 3_register/305_Style_and_Markings.md
 adapters:
-    claude: { surface: rules, paths: ["**/*.ipynb"] }
-    grok: { surface: gate_until_read }
+    claude: { verdict: rules, paths: ["**/*.ipynb"] }
+    grok: { verdict: gate_until_read }
 ---
 
 # Notebook

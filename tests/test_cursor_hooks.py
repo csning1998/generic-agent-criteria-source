@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from adapter_install.install import SPECS
-from adapter_install.install import execute_apply
+from adapter_install.install import reconcile_all_specs
 from adapter_install.install import validate_dest_rel
 
 
@@ -85,7 +85,7 @@ def test_normalize_maps_cursor_write_fields() -> None:
     assert mapped["tool_input"]["content"] == "# Title\n"
 
 
-def test_intercept_edit_write_denies_first_markdown_write_under_cursor_runtime(
+def test_intercept_edit_write_denies_first_markdown_write_under_cursor_harness(
     cursor_argv, isolated_criteria: Path, capsys
 ) -> None:
     """The first markdown Write is denied and load text is returned."""
@@ -106,7 +106,7 @@ def test_intercept_edit_write_denies_first_markdown_write_under_cursor_runtime(
     assert "markdown L2 body" in out["agent_message"]
 
 
-def test_intercept_edit_write_allows_retry_under_cursor_runtime(
+def test_intercept_edit_write_allows_retry_under_cursor_harness(
     cursor_argv, isolated_criteria: Path, capsys
 ) -> None:
     """A second markdown Write in the same session is allowed."""
@@ -317,7 +317,7 @@ def test_apply_materializes_cursor_gate_files(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     root = Path(__file__).resolve().parent.parent
-    assert execute_apply(root, home) == 0
+    assert reconcile_all_specs(root, home) == 0
     hooks = home / ".cursor" / "hooks"
     gate = hooks / "gate-check.py"
     post = hooks / "post-write-review.py"
@@ -395,7 +395,7 @@ def test_cursor_hooks_json_source_wires_pre_post_stop() -> None:
     assert "stop-output-scan.py" in hooks["stop"][0]["command"]
 
 
-def test_is_cursor_runtime_ignores_relative_argv(
+def test_is_cursor_harness_ignores_relative_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User-hook argv `hooks/gate-check.py` still selects Cursor JSON."""
@@ -403,11 +403,11 @@ def test_is_cursor_runtime_ignores_relative_argv(
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.cursor/hooks/gate-check.py"
     )
-    assert gate_check.is_cursor_runtime() is True
+    assert gate_check.is_cursor_harness() is True
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.claude/hooks/gate-check.py"
     )
-    assert gate_check.is_cursor_runtime() is False
+    assert gate_check.is_cursor_harness() is False
 
 
 def test_resolve_state_directory_uses_cursor_tree_when_unoverridden(
@@ -708,14 +708,14 @@ def test_cursor_denies_notebook_write(
         "MCP: plugin-github-github-add_issue_comment",
     ],
 )
-def test_cursor_mcp_write_markers_ask(
+def test_cursor_mcp_write_markers_deny(
     cursor_argv,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys,
     tool_name: str,
 ) -> None:
-    """Named GitLab/GitHub MCP writes ask under Cursor when unauthorized."""
+    """Named GitLab/GitHub MCP writes deny under Cursor when unauthorized."""
     monkeypatch.setattr(gate_check, "STATE_DIR", tmp_path / "gate-state")
     assert gate_check.is_cursor_mcp_external_write(tool_name) is True
     payload = {
@@ -724,14 +724,13 @@ def test_cursor_mcp_write_markers_ask(
     }
     with pytest.raises(SystemExit):
         gate_check.require_exec_phrase(payload, f"MCP tool '{tool_name}'")
-    out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "ask"
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
 
 
-def test_cursor_git_push_asks_without_phrase(
+def test_cursor_git_push_denies_without_native_signal(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Git push (non-force) asks on Cursor without an execution phrase."""
+    """Git push (non-force) denies on Cursor without a native signal."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     payload = {
         "session_id": "conv-1",
@@ -740,8 +739,16 @@ def test_cursor_git_push_asks_without_phrase(
     }
     with pytest.raises(SystemExit):
         gate_check.intercept_bash(payload, scenarios)
-    out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "ask"
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
+
+
+def _assert_cursor_external_write_denied(out: dict) -> None:
+    """Cursor denies without ask and without an AskUserQuestion instruction."""
+    assert out["permission"] == "deny"
+    combined = out.get("user_message", "") + out.get("agent_message", "")
+    assert "Call AskUserQuestion" not in combined
+    assert "external write L2" not in out.get("agent_message", "")
+    assert "Do not invoke AskQuestion" in out.get("user_message", "")
 
 
 def _external_write_scenarios(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -796,10 +803,10 @@ def _approve_transcript(tmp_path: Path) -> Path:
     return _phrase_transcript(tmp_path, "Approve")
 
 
-def test_cursor_glab_write_asks_without_transcript(
+def test_cursor_glab_write_denies_without_transcript(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Cursor with no transcript asks via the native permission card."""
+    """Cursor with no transcript denies without AskUserQuestion."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     payload = {
         "session_id": "conv-1",
@@ -809,18 +816,21 @@ def test_cursor_glab_write_asks_without_transcript(
     with pytest.raises(SystemExit):
         gate_check.intercept_bash(payload, scenarios)
     out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "ask"
+    _assert_cursor_external_write_denied(out)
     assert "external-write.md" in out["user_message"]
-    assert "AskUserQuestion" not in out["user_message"]
-    assert "AskUserQuestion" not in out.get("agent_message", "")
 
 
-def test_cursor_glab_write_asks_on_empty_transcript_path(
+def test_cursor_glab_write_denies_on_empty_transcript_path(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     """An empty transcript_path string must not read Path('.') as a file."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
-    assert gate_check.extract_latest_user_prompt("") == ""
+    assert (
+        gate_check.extract_latest_user_prompt(
+            gate_check.load_transcript_events("")
+        )
+        == ""
+    )
     payload = {
         "session_id": "conv-1",
         "transcript_path": "",
@@ -828,8 +838,43 @@ def test_cursor_glab_write_asks_on_empty_transcript_path(
     }
     with pytest.raises(SystemExit):
         gate_check.intercept_bash(payload, scenarios)
-    out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "ask"
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
+
+
+def test_cursor_glab_write_denies_on_null_transcript_path(
+    cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A null transcript_path must not reach the Claude phrase parser."""
+    scenarios = _external_write_scenarios(tmp_path, monkeypatch)
+    payload = {
+        "session_id": "conv-1",
+        "transcript_path": None,
+        "tool_input": {"command": "glab api --method POST projects/x/notes"},
+    }
+    with pytest.raises(SystemExit):
+        gate_check.intercept_bash(payload, scenarios)
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
+
+
+def test_cursor_role_user_approve_does_not_authorize(
+    cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Cursor JSONL role=user Approve text must not authorize a write."""
+    scenarios = _external_write_scenarios(tmp_path, monkeypatch)
+    path = tmp_path / "cursor-role.jsonl"
+    event = {
+        "role": "user",
+        "message": {"content": [{"type": "text", "text": "Approve"}]},
+    }
+    path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    payload = {
+        "session_id": "conv-1",
+        "transcript_path": str(path),
+        "tool_input": {"command": "glab api --method POST projects/x/notes"},
+    }
+    with pytest.raises(SystemExit):
+        gate_check.intercept_bash(payload, scenarios)
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
 
 
 def test_claude_glab_write_denies_without_transcript(
@@ -855,10 +900,10 @@ def test_claude_glab_write_denies_without_transcript(
     assert out.get("permission") != "ask"
 
 
-def test_cursor_deny_transcript_still_asks(
+def test_cursor_deny_transcript_still_denies(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """A Deny tool_result label does not authorize an external write."""
+    """A Claude Deny tool_result label does not authorize Cursor."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     transcript = _phrase_transcript(tmp_path, "Deny")
     payload = {
@@ -868,8 +913,7 @@ def test_cursor_deny_transcript_still_asks(
     }
     with pytest.raises(SystemExit):
         gate_check.intercept_bash(payload, scenarios)
-    out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "ask"
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
 
 
 def test_claude_deny_transcript_still_denies(
@@ -894,10 +938,10 @@ def test_claude_deny_transcript_still_denies(
     assert "AskUserQuestion" in reason
 
 
-def test_cursor_glab_with_approve_transcript_reaches_gate_once(
+def test_cursor_claude_approve_transcript_does_not_authorize(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Approve in a Cursor transcript skips ask and reaches injection."""
+    """A Claude JSONL Approve tool_result must not authorize Cursor."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     transcript = _approve_transcript(tmp_path)
     payload = {
@@ -907,16 +951,13 @@ def test_cursor_glab_with_approve_transcript_reaches_gate_once(
     }
     with pytest.raises(SystemExit):
         gate_check.intercept_bash(payload, scenarios)
-    out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "deny"
-    assert "external write L2" in out["agent_message"]
-    assert out["permission"] != "ask"
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
 
 
-def test_cursor_approve_second_call_allows(
+def test_cursor_approve_second_call_still_denies(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """After Approve and the first injection deny, a retry is allowed."""
+    """A Claude Approve transcript must not open the Cursor retry path."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     transcript = _approve_transcript(tmp_path)
     payload = {
@@ -929,8 +970,7 @@ def test_cursor_approve_second_call_allows(
     capsys.readouterr()
     with pytest.raises(SystemExit):
         gate_check.intercept_bash(payload, scenarios)
-    out = json.loads(capsys.readouterr().out)
-    assert out == {"permission": "allow"}
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
 
 
 def test_claude_approve_second_call_allows(
@@ -960,14 +1000,14 @@ def test_claude_approve_second_call_allows(
     "phrase",
     ["去執行", "跑這個", "請執行", "執行吧"],
 )
-def test_chinese_exec_phrase_authorizes_gate_once(
+def test_chinese_exec_phrase_does_not_authorize_cursor(
     cursor_argv,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys,
     phrase: str,
 ) -> None:
-    """Chinese backup phrases authorize the same path as Approve."""
+    """Claude JSONL Chinese phrases must not authorize Cursor."""
     scenarios = _external_write_scenarios(tmp_path, monkeypatch)
     transcript = _phrase_transcript(tmp_path, phrase)
     payload = {
@@ -977,9 +1017,7 @@ def test_chinese_exec_phrase_authorizes_gate_once(
     }
     with pytest.raises(SystemExit):
         gate_check.intercept_bash(payload, scenarios)
-    out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "deny"
-    assert "external write L2" in out["agent_message"]
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
 
 
 def test_cursor_readonly_glab_allows_without_ask(
@@ -998,10 +1036,10 @@ def test_cursor_readonly_glab_allows_without_ask(
     assert out == {"permission": "allow"}
 
 
-def test_cursor_mcp_save_note_asks(
+def test_cursor_mcp_save_note_denies(
     cursor_argv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Cursor MCP GitLab note writes ask when no execution phrase is present."""
+    """Cursor MCP GitLab note writes deny without a native signal."""
     monkeypatch.setattr(gate_check, "STATE_DIR", tmp_path / "gate-state")
     tool_name = "MCP: plugin-gitlab-GitLab-save_note"
     assert gate_check.is_cursor_mcp_external_write(tool_name) is True
@@ -1011,9 +1049,7 @@ def test_cursor_mcp_save_note_asks(
     }
     with pytest.raises(SystemExit):
         gate_check.require_exec_phrase(payload, f"MCP tool '{tool_name}'")
-    out = json.loads(capsys.readouterr().out)
-    assert out["permission"] == "ask"
-    assert "AskUserQuestion" not in out["user_message"]
+    _assert_cursor_external_write_denied(json.loads(capsys.readouterr().out))
 
 
 def test_claude_mcp_save_note_is_not_gated(
@@ -1341,10 +1377,10 @@ def test_stop_output_ignores_non_assistant_transcript_lines(
         ),
     ]
     transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    text = stop.last_assistant_text(str(transcript))
+    text = stop.load_last_assistant_text(str(transcript))
     assert "Nested assistant role still counts." in text
     assert "Ban" not in text
-    assert stop.finding(text) is None
+    assert stop.find_assistant_output_ban(text) is None
 
 
 def test_skill_module_gate_denies_baked_home(

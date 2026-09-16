@@ -28,7 +28,9 @@ Mutating disk bytes for Jupyter Notebook (`*.ipynb`) files is strictly prohibite
 
 ## Section 3. Prompt-Semantic Scenarios
 
-The operational face MUST be partitioned using the predicates defined in § 201. A single turn MAY plan before executing. Planning replies MUST follow § 104(d) due diligence and § 109 recommendation convergence. When a local execute act or an external execute act triggers, the system MUST transition to § 105(f) execution order and § 111 minimalist reporting:
+The operational face MUST be partitioned using the predicates defined in § 201. A single turn MAY plan before executing. Planning replies MUST follow § 104(d) due diligence and § 109 recommendation convergence. When a local execute act or an external execute act triggers, the system MUST transition to § 105(f) execution order and § 111 minimalist reporting.
+
+Enforcement tokens for Scenario frontmatter `verdict:` and for the table below are the following values: `deny`, `gate_until_read`, `gate_once`, `rules`, `Permission check, deny mechanism`, `Skill invocation (X)`, `Stop hook scan`, and `Resident distill`.
 
 - Local execute: A non-read-only tool call which alters the working-tree content hash (digest of file bytes, excluding `.git/`). A metadata-only modification with unchanged bytes is not a local execute act.
 - External execute: A write operation targeting an external system, including `git commit`, `git push`, merge request operations, MCP writes, outbound messages, issue creation, and CI pipeline triggers.
@@ -36,7 +38,7 @@ The operational face MUST be partitioned using the predicates defined in § 201.
 
 | Triggering Context                                                | Operational Face | Scenario ID      | Enforcement Mechanism                         |
 | ----------------------------------------------------------------- | ---------------- | ---------------- | --------------------------------------------- |
-| Dialogue, proposal, architecture, accountability, read-only tools | planning         | reply            | Resident distill, stop mechanism              |
+| Dialogue, proposal, architecture, accountability, read-only tools | planning         | reply            | Resident distill                              |
 | The user halts execution or cites a dialogue violation            | planning         | reply (§ 108)    | Resident distill                              |
 | Investigation and evidence extraction during debugging            | planning         | reply (§ 205)    | Resident distill                              |
 | Working-tree content hash alteration (excluding `.git/`)          | execute          | local-mutate     | gate_until_read                               |

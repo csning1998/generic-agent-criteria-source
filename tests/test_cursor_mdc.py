@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 from adapter_install.cursor_mdc import LANGUAGES_REL
-from adapter_install.cursor_mdc import iter_cursor_scenarios
+from adapter_install.cursor_mdc import load_cursor_scenarios
 from adapter_install.cursor_mdc import parse_cursor_scenario
 from adapter_install.cursor_mdc import parse_languages_scenarios
 from adapter_install.cursor_mdc import render_cursor_mdc
 from adapter_install.install import MODE_CURSOR_MDC
 from adapter_install.install import SPECS
-from adapter_install.install import execute_apply
 from adapter_install.install import inspect_spec_drift
+from adapter_install.install import reconcile_all_specs
 from adapter_install.install import reconcile_spec
 from adapter_install.install import render_expected_payload
 from adapter_install.install import resolve_dest
@@ -48,7 +48,7 @@ def test_parse_cursor_accepts_two_space_load_and_nested_globs() -> None:
         "  - references/lang-md.md\n"
         "adapters:\n"
         "  cursor:\n"
-        "    surface: mdc\n"
+        "    verdict: mdc\n"
         '    globs: "**/*.md,**/*.mdx"\n'
         "---\n"
         "body\n"
@@ -67,7 +67,7 @@ def test_parse_cursor_missing_globs_raises() -> None:
         "load:\n"
         "    - references/lang-md.md\n"
         "adapters:\n"
-        "    cursor: { surface: mdc }\n"
+        "    cursor: { verdict: mdc }\n"
         "---\n"
         "body\n"
     )
@@ -116,9 +116,9 @@ def test_prompt_scenarios_do_not_declare_cursor() -> None:
     assert parse_cursor_scenario(routing_text) is None
 
 
-def test_iter_cursor_scenarios_scenario_markdown_is_absent_from_rows() -> None:
+def test_load_cursor_scenarios_scenario_markdown_is_absent_from_rows() -> None:
     """Cursor inbound is the languages table. Scenario markdown is excluded."""
-    rows = iter_cursor_scenarios(_repo_root())
+    rows = load_cursor_scenarios(_repo_root())
     assert {rel for rel, _parsed in rows} == {LANGUAGES_REL}
     assert {parsed.scenario_id for _rel, parsed in rows} == set(_LANGUAGE_IDS)
 
@@ -201,7 +201,7 @@ def test_apply_writes_rendered_mdc_not_scenario_bytes(
     """Apply writes rendered bytes. Dest is a regular file, not a symlink."""
     home = tmp_path / "home"
     home.mkdir()
-    assert execute_apply(_repo_root(), home) == 0
+    assert reconcile_all_specs(_repo_root(), home) == 0
     dest = home / ".cursor" / "rules" / "lang-typescript.mdc"
     assert dest.is_file()
     assert not dest.is_symlink()

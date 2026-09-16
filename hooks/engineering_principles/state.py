@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Any
 
 
-def hook_disabled() -> bool:
+def is_hook_disabled() -> bool:
     """Return True when the owner disabled the hook for this process."""
     return os.environ.get("ENGINEERING_PRINCIPLES_HOOK", "1") == "0"
 
 
-def state_root() -> Path:
+def resolve_state_root() -> Path:
     """Return the directory that holds per-session JSON state files."""
     return Path(
         os.environ.get(
@@ -26,7 +26,7 @@ def state_root() -> Path:
     )
 
 
-def session_id(payload: dict[str, Any]) -> str:
+def extract_session_id(payload: dict[str, Any]) -> str:
     """Return a stable session key, or a distinct ephemeral id."""
     value = (
         os.environ.get("GROK_SESSION_ID")
@@ -38,7 +38,7 @@ def session_id(payload: dict[str, Any]) -> str:
     return f"ephemeral-{os.getpid()}-{secrets.token_hex(8)}"
 
 
-def workspace_root(payload: dict[str, Any]) -> Path:
+def resolve_workspace_root(payload: dict[str, Any]) -> Path:
     """Return the workspace root carried on the hook payload."""
     raw = (
         os.environ.get("GROK_WORKSPACE_ROOT")
@@ -51,22 +51,22 @@ def workspace_root(payload: dict[str, Any]) -> Path:
     return Path(str(raw)).expanduser()
 
 
-def state_path(payload: dict[str, Any]) -> Path:
+def resolve_state_path(payload: dict[str, Any]) -> Path:
     """Return the JSON path for this session and workspace pair."""
-    workspace = workspace_root(payload)
+    workspace = resolve_workspace_root(payload)
     digest = hashlib.sha256(
         str(workspace.resolve()).encode("utf-8")
     ).hexdigest()[:16]
-    key = f"{session_id(payload)}__{digest}"
-    return state_root() / f"{key}.json"
+    key = f"{extract_session_id(payload)}__{digest}"
+    return resolve_state_root() / f"{key}.json"
 
 
-def empty_state(payload: dict[str, Any]) -> dict[str, Any]:
+def derive_empty_state(payload: dict[str, Any]) -> dict[str, Any]:
     """Return a fresh state document for this payload."""
     return {
         "version": 2,
-        "session_id": session_id(payload),
-        "workspace_root": str(workspace_root(payload)),
+        "session_id": extract_session_id(payload),
+        "workspace_root": str(resolve_workspace_root(payload)),
         "read_paths": [],
         "generic_leave": False,
         "generic_leave_modules": [],
@@ -78,16 +78,16 @@ def empty_state(payload: dict[str, Any]) -> dict[str, Any]:
 
 def load_state(payload: dict[str, Any]) -> dict[str, Any]:
     """Load session state, or return an empty document."""
-    path = state_path(payload)
+    path = resolve_state_path(payload)
     if not path.is_file():
-        return empty_state(payload)
+        return derive_empty_state(payload)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return empty_state(payload)
+        return derive_empty_state(payload)
     if not isinstance(data, dict):
-        return empty_state(payload)
-    merged = empty_state(payload)
+        return derive_empty_state(payload)
+    merged = derive_empty_state(payload)
     merged.update(data)
     if not isinstance(merged.get("read_paths"), list):
         merged["read_paths"] = []
@@ -98,9 +98,9 @@ def load_state(payload: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def save_state(payload: dict[str, Any], state: dict[str, Any]) -> None:
+def persist_state(payload: dict[str, Any], state: dict[str, Any]) -> None:
     """Atomically write session state to disk."""
-    path = state_path(payload)
+    path = resolve_state_path(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     fd, tmp_name = tempfile.mkstemp(prefix=path.name, dir=str(path.parent))

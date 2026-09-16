@@ -8,12 +8,12 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
-from engineering_principles.dispatch import handle_post_tool_use
-from engineering_principles.dispatch import handle_pre_tool_use
-from engineering_principles.dispatch import handle_stop
-from engineering_principles.module_stateless import composed_module_text
-from engineering_principles.module_stateless import first_stateful_hit
-from engineering_principles.module_stateless import module_stateless_reason
+from engineering_principles.dispatch import intercept_post_tool_use
+from engineering_principles.dispatch import intercept_pre_tool_use
+from engineering_principles.dispatch import intercept_stop
+from engineering_principles.module_stateless import derive_composed_module_text
+from engineering_principles.module_stateless import find_first_stateful_hit
+from engineering_principles.module_stateless import find_module_stateless_reason
 from engineering_principles.module_stateless import resolve_skill_module_paths
 from engineering_principles.state import load_state
 
@@ -67,36 +67,36 @@ def _resolved_module(tmp_path: Path) -> str:
     return str((tmp_path / "skills/skill-module-demo/SKILL.md").resolve())
 
 
-def test_first_stateful_hit_placeholder_collection() -> None:
+def test_find_first_stateful_hit_placeholder_collection() -> None:
     """Angle-bracket tokens are stripped before the collection scan."""
     text = '{"collection": "collection://<from 03-identifiers.md>"}'
-    assert first_stateful_hit(text) is None
+    assert find_first_stateful_hit(text) is None
 
 
-def test_first_stateful_hit_baked_identifiers() -> None:
+def test_find_first_stateful_hit_baked_identifiers() -> None:
     """UUID, home path, login, prefix, and filled tables are denied."""
-    assert first_stateful_hit(_UUID) is not None
-    assert first_stateful_hit("/home/csning1998/.grok/docs") is not None
-    assert first_stateful_hit("$HOME/csning1998/docs") is not None
-    assert first_stateful_hit('group: "csning1998-lab"') is not None
-    assert first_stateful_hit("data_source 316919d4-aaaa") is not None
+    assert find_first_stateful_hit(_UUID) is not None
+    assert find_first_stateful_hit("/home/csning1998/.grok/docs") is not None
+    assert find_first_stateful_hit("$HOME/csning1998/docs") is not None
+    assert find_first_stateful_hit('group: "csning1998-lab"') is not None
+    assert find_first_stateful_hit("data_source 316919d4-aaaa") is not None
     assert (
-        first_stateful_hit('{"type_from_conv": {"feat": "type::feature"}}')
+        find_first_stateful_hit('{"type_from_conv": {"feat": "type::feature"}}')
         is not None
     )
 
 
-def test_first_stateful_hit_empty_tables() -> None:
+def test_find_first_stateful_hit_empty_tables() -> None:
     """Empty mapping objects and placeholder groups stay in a module."""
     text = (
         '{"group": "group/path", "tables": {}, '
         '"type_from_conv": {"<key>": "<label>"}, '
         '"allowlist": ["<label>"]}'
     )
-    assert first_stateful_hit(text) is None
+    assert find_first_stateful_hit(text) is None
 
 
-def test_first_stateful_hit_placeholder_tables() -> None:
+def test_find_first_stateful_hit_placeholder_tables() -> None:
     """Placeholder mapping keys stay clean after JSON decode."""
     text = (
         '{"type_from_conv": {"<key>": "<label>"}, '
@@ -105,21 +105,21 @@ def test_first_stateful_hit_placeholder_tables() -> None:
         '"bang_adds": "<label>", '
         '"keep_prefixes": ["<prefix>"]}'
     )
-    assert first_stateful_hit(text) is None
+    assert find_first_stateful_hit(text) is None
 
 
-def test_first_stateful_hit_nested_tables() -> None:
+def test_find_first_stateful_hit_nested_tables() -> None:
     """Filled tables under a tables object are denied."""
     text = (
         '{"tables": {"type_from_conv": {"feat": "type::feature"}, '
         '"allowlist": ["type::feature"]}}'
     )
-    hit = first_stateful_hit(text)
+    hit = find_first_stateful_hit(text)
     assert hit is not None
     assert "mapping table" in hit
 
 
-def test_first_stateful_hit_pretty_printed_json_fence() -> None:
+def test_find_first_stateful_hit_pretty_printed_json_fence() -> None:
     """Pretty-printed JSON in a markdown fence is decoded."""
     text = (
         "example\n\n```json\n{\n"
@@ -128,39 +128,39 @@ def test_first_stateful_hit_pretty_printed_json_fence() -> None:
         "    }\n"
         "}\n```\n"
     )
-    hit = first_stateful_hit(text)
+    hit = find_first_stateful_hit(text)
     assert hit is not None
     assert "type_from_conv" in hit
 
 
-def test_first_stateful_hit_empty_string_keys() -> None:
+def test_find_first_stateful_hit_empty_string_keys() -> None:
     """Empty strings after a would-be placeholder strip remain filled."""
-    assert first_stateful_hit('{"": ""}') is None
+    assert find_first_stateful_hit('{"": ""}') is None
     assert (
-        first_stateful_hit('{"type_from_conv": {"": "type::feature"}}')
+        find_first_stateful_hit('{"type_from_conv": {"": "type::feature"}}')
         is not None
     )
 
 
-def test_first_stateful_hit_dummy_result_json() -> None:
+def test_find_first_stateful_hit_dummy_result_json() -> None:
     """GitlabMrLabelResult dummy 0/1 values are not mapping tables."""
     text = (
         '{"ok": true, "error": null, "mode": "dry-run", '
         '"total": 0, "noop": 0, "changed": 0, "applied": 0, '
         '"failed": [], "changes": []}'
     )
-    assert first_stateful_hit(text) is None
+    assert find_first_stateful_hit(text) is None
 
 
-def test_first_stateful_hit_trailing_comma() -> None:
+def test_find_first_stateful_hit_trailing_comma() -> None:
     """Invalid JSON is skipped. The decoder does not guess table keys."""
     text = '{"type_from_conv": {"feat": "type::feature",}}'
-    assert first_stateful_hit(text) is None
+    assert find_first_stateful_hit(text) is None
 
 
-def test_first_stateful_hit_area_patterns() -> None:
+def test_find_first_stateful_hit_area_patterns() -> None:
     """area_patterns schema keys are allowed. Concrete values are not."""
-    hit = first_stateful_hit(
+    hit = find_first_stateful_hit(
         '{"area_patterns": [{"pattern": "terraform", '
         '"label": "area::infrastructure"}]}'
     )
@@ -168,22 +168,22 @@ def test_first_stateful_hit_area_patterns() -> None:
     assert "area_patterns" in hit
 
 
-def test_first_stateful_hit_null_rename() -> None:
+def test_find_first_stateful_hit_null_rename() -> None:
     """A null rename field is unfilled JSON, not a GitLab rename table."""
     text = '{"mkdir_paths": ["~/Documents/[P] x"], "rename": null, "moves": []}'
-    assert first_stateful_hit(text) is None
+    assert find_first_stateful_hit(text) is None
 
 
-def test_first_stateful_hit_label_rename() -> None:
+def test_find_first_stateful_hit_label_rename() -> None:
     """A string-to-string rename map is a filled mapping table."""
-    hit = first_stateful_hit(
+    hit = find_first_stateful_hit(
         '{"tables": {"rename": {"pending": "status::pending"}}}'
     )
     assert hit is not None
     assert "rename" in hit
 
 
-def test_first_stateful_hit_checked_in_modules() -> None:
+def test_find_first_stateful_hit_checked_in_modules() -> None:
     """Every file under skills/skill-module-* must pass the scan."""
     assert _SKILLS_ROOT.is_dir()
     dirty: list[str] = []
@@ -192,25 +192,25 @@ def test_first_stateful_hit_checked_in_modules() -> None:
             continue
         if path.suffix not in {".md", ".py"}:
             continue
-        hit = first_stateful_hit(path.read_text(encoding="utf-8"))
+        hit = find_first_stateful_hit(path.read_text(encoding="utf-8"))
         if hit:
             dirty.append(f"{path}: {hit}")
     assert dirty == []
 
 
-def test_module_stateless_reason_non_module_path() -> None:
+def test_find_module_stateless_reason_non_module_path() -> None:
     """Layer files may hold workspace identifiers."""
-    reason = module_stateless_reason(
+    reason = find_module_stateless_reason(
         "skills/skill-apply-gitlab-mr-labels/SKILL.md",
         _UUID,
     )
     assert reason is None
 
 
-def test_composed_module_text_omits_command() -> None:
+def test_derive_composed_module_text_omits_command() -> None:
     """A shell command is not treated as prospective file text."""
-    assert composed_module_text("", "", "", "") == ""
-    assert composed_module_text("body", "", "", "") == "body"
+    assert derive_composed_module_text("", "", "", "") == ""
+    assert derive_composed_module_text("body", "", "", "") == "body"
 
 
 def test_resolve_skill_module_paths_outside_workspace(tmp_path: Path) -> None:
@@ -276,7 +276,7 @@ def test_resolve_skill_module_paths_sed_i(tmp_path: Path) -> None:
     )
 
 
-def test_handle_pre_tool_use_denies_stateful_write(
+def test_intercept_pre_tool_use_denies_stateful_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """PreToolUse denies a skill-module Write that bakes a UUID."""
@@ -288,12 +288,12 @@ def test_handle_pre_tool_use_denies_stateful_write(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 2
     assert "MUST be stateless" in buf.getvalue()
 
 
-def test_handle_pre_tool_use_compose_scans_whole_file(
+def test_intercept_pre_tool_use_compose_scans_whole_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A clean patch on a dirty module is still denied."""
@@ -315,12 +315,12 @@ def test_handle_pre_tool_use_compose_scans_whole_file(
     }
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 2
     assert "collection UUID" in buf.getvalue()
 
 
-def test_handle_pre_tool_use_bash_heredoc_write(
+def test_intercept_pre_tool_use_bash_heredoc_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A shell write that names a skill-module path is scanned."""
@@ -331,12 +331,12 @@ def test_handle_pre_tool_use_bash_heredoc_write(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 2
     assert "MUST be stateless" in buf.getvalue()
 
 
-def test_handle_pre_tool_use_bash_mention_without_redirect(
+def test_intercept_pre_tool_use_bash_mention_without_redirect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A command that only names a skill-module path is not a write."""
@@ -347,12 +347,12 @@ def test_handle_pre_tool_use_bash_mention_without_redirect(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 0
     assert "MUST be stateless" not in buf.getvalue()
 
 
-def test_handle_pre_tool_use_bash_test_file_write(
+def test_intercept_pre_tool_use_bash_test_file_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A test file may mention skill-module paths and UUIDs."""
@@ -366,11 +366,11 @@ def test_handle_pre_tool_use_bash_test_file_write(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 0
 
 
-def test_handle_pre_tool_use_quoted_redirect(
+def test_intercept_pre_tool_use_quoted_redirect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An echo payload redirected into a skill-module file is scanned."""
@@ -381,12 +381,12 @@ def test_handle_pre_tool_use_quoted_redirect(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 2
     assert "MUST be stateless" in buf.getvalue()
 
 
-def test_handle_pre_tool_use_command_comment(
+def test_intercept_pre_tool_use_command_comment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A UUID in a shell comment is not prospective file text."""
@@ -397,12 +397,12 @@ def test_handle_pre_tool_use_command_comment(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 0
     assert "MUST be stateless" not in buf.getvalue()
 
 
-def test_handle_pre_tool_use_tee_write(
+def test_intercept_pre_tool_use_tee_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A tee target on a skill-module path is a write."""
@@ -414,12 +414,12 @@ def test_handle_pre_tool_use_tee_write(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 2
     assert "MUST be stateless" in buf.getvalue()
 
 
-def test_handle_pre_tool_use_heredoc_body(
+def test_intercept_pre_tool_use_heredoc_body(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A heredoc body is a scan blob for the redirect target."""
@@ -432,12 +432,12 @@ def test_handle_pre_tool_use_heredoc_body(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 2
     assert "mapping table" in buf.getvalue()
 
 
-def test_handle_pre_tool_use_sed_i_script(
+def test_intercept_pre_tool_use_sed_i_script(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A sed -i script that inserts a UUID is denied."""
@@ -448,12 +448,12 @@ def test_handle_pre_tool_use_sed_i_script(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 2
     assert "MUST be stateless" in buf.getvalue()
 
 
-def test_handle_pre_tool_use_cp_dest_without_payload(
+def test_intercept_pre_tool_use_cp_dest_without_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cp records a dest. A UUID elsewhere in the command is not file text."""
@@ -464,12 +464,12 @@ def test_handle_pre_tool_use_cp_dest_without_payload(
     )
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_pre_tool_use(payload)
+        code = intercept_pre_tool_use(payload)
     assert code == 0
     assert "MUST be stateless" not in buf.getvalue()
 
 
-def test_handle_post_tool_use_outside_workspace(
+def test_intercept_post_tool_use_outside_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """PostToolUse does not record a skill-module path outside workspace."""
@@ -485,12 +485,12 @@ def test_handle_post_tool_use_outside_workspace(
             "content": f"url = {_UUID}\n",
         },
     }
-    assert handle_post_tool_use(payload) == 0
+    assert intercept_post_tool_use(payload) == 0
     state = load_state(payload)
     assert state.get("skill_module_writes") == []
 
 
-def test_handle_post_tool_use_cp_dest(
+def test_intercept_post_tool_use_cp_dest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """PostToolUse records a cp destination under a skill-module path."""
@@ -508,13 +508,13 @@ def test_handle_post_tool_use_cp_dest(
             "command": "cp notes.md skills/skill-module-demo/SKILL.md",
         },
     }
-    assert handle_post_tool_use(payload) == 0
+    assert intercept_post_tool_use(payload) == 0
     state = load_state(payload)
     writes = state.get("skill_module_writes") or []
     assert _resolved_module(tmp_path) in writes
 
 
-def test_handle_stop_blocks_dirty_recorded_file(
+def test_intercept_stop_blocks_dirty_recorded_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """After a write, Stop blocks until the on-disk module is clean."""
@@ -533,7 +533,7 @@ def test_handle_stop_blocks_dirty_recorded_file(
     }
     err = StringIO()
     with redirect_stderr(err):
-        assert handle_post_tool_use(post) == 0
+        assert intercept_post_tool_use(post) == 0
     assert "MUST be stateless" in err.getvalue()
 
     stop = {
@@ -545,25 +545,25 @@ def test_handle_stop_blocks_dirty_recorded_file(
     }
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_stop(stop)
+        code = intercept_stop(stop)
     assert code == 2
     assert "Rewrite" in buf.getvalue()
 
     target.write_text("url = collection://<from locate>\n", encoding="utf-8")
     buf = StringIO()
     with redirect_stdout(buf):
-        code = handle_stop(stop)
+        code = intercept_stop(stop)
     assert code == 0
     assert buf.getvalue().strip() == ""
 
 
-def test_handle_stop_session_end(
+def test_intercept_stop_session_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Session-end Stop fires are observe-only."""
     _session_env(tmp_path, monkeypatch)
     assert (
-        handle_stop(
+        intercept_stop(
             {
                 "hookEventName": "Stop",
                 "sessionId": "stateless-session",

@@ -24,23 +24,23 @@ from engineering_principles.config import READ_ONLY_CMD_RE
 from engineering_principles.config import TAUTOLOGICAL_PROVIDER_RE
 from engineering_principles.config import VAULT_CREDENTIAL_MODULE_RE
 from engineering_principles.config import WRITE_CMD_RE
-from engineering_principles.paths import architecture_repo_tokens
 from engineering_principles.paths import find_planning_root
-from engineering_principles.paths import introduces_bootstrapper_name
 from engineering_principles.paths import is_ansible_path
 from engineering_principles.paths import is_consumer_layer
 from engineering_principles.paths import is_generic_module
 from engineering_principles.paths import is_governed_path
 from engineering_principles.paths import is_iac_path
+from engineering_principles.paths import is_introduced_bootstrapper_name
+from engineering_principles.paths import is_planning_gate_required
 from engineering_principles.paths import is_self_path
-from engineering_principles.paths import path_needs_planning_gate
-from engineering_principles.paths import posix
+from engineering_principles.paths import load_architecture_repo_tokens
+from engineering_principles.paths import normalize_posix
 from engineering_principles.state import load_state
-from engineering_principles.state import save_state
-from engineering_principles.state import workspace_root
+from engineering_principles.state import persist_state
+from engineering_principles.state import resolve_workspace_root
 
 
-def added(before: str, after: str, pattern: re.Pattern[str]) -> bool:
+def has_added_match(before: str, after: str, pattern: re.Pattern[str]) -> bool:
     """Return True when after introduces a new pattern hit."""
     if not after or not pattern.search(after):
         return False
@@ -57,11 +57,11 @@ def record_read(payload: dict[str, Any], path: str) -> dict[str, Any]:
     if resolved not in reads:
         reads.append(resolved)
     state["read_paths"] = reads
-    save_state(payload, state)
+    persist_state(payload, state)
     return state
 
 
-def apply_leave(payload: dict[str, Any], prompt: str) -> dict[str, Any]:
+def record_leave(payload: dict[str, Any], prompt: str) -> dict[str, Any]:
     """Record owner leave phrases from the current prompt."""
     state = load_state(payload)
     changed = False
@@ -86,22 +86,22 @@ def apply_leave(payload: dict[str, Any], prompt: str) -> dict[str, Any]:
         state["guest_sql_leave"] = True
         changed = True
     if changed:
-        save_state(payload, state)
+        persist_state(payload, state)
     return state
 
 
-def generic_leave_covers(state: dict[str, Any], path: str) -> bool:
+def has_generic_leave_cover(state: dict[str, Any], path: str) -> bool:
     """Return True when session leave covers this generic module path."""
     if not state.get("generic_leave"):
         return False
     modules = [str(item) for item in state.get("generic_leave_modules", [])]
     if not modules:
         return True
-    posix_path = posix(path)
+    posix_path = normalize_posix(path)
     return any(fragment in posix_path for fragment in modules)
 
 
-def env_alias_in_generic(text: str) -> bool:
+def has_env_alias_in_generic(text: str) -> bool:
     """Return True when an environment alias is hardcoded in the text."""
     for line in text.splitlines():
         if not ENV_ALIAS_RE.search(line):
@@ -114,7 +114,7 @@ def env_alias_in_generic(text: str) -> bool:
     return False
 
 
-def cite(
+def render_cite(
     rule: str,
     text: str,
     pattern: re.Pattern[str] | None,
@@ -133,12 +133,12 @@ def cite(
     )
 
 
-def planning_status(
+def inspect_planning_status(
     payload: dict[str, Any],
     state: dict[str, Any],
 ) -> dict[str, Any]:
     """Return whether required planning files have been opened."""
-    planning = find_planning_root(workspace_root(payload))
+    planning = find_planning_root(resolve_workspace_root(payload))
     if planning is None:
         cwd = payload.get("cwd")
         if cwd:
@@ -168,16 +168,18 @@ def planning_status(
         "architecture_read": architecture_read,
         "decisions_path": str(decisions) if decisions.is_file() else None,
         "architecture_paths": [str(item) for item in architecture_files],
-        "repo_tokens": architecture_repo_tokens(planning),
+        "repo_tokens": load_architecture_repo_tokens(planning),
     }
 
 
-def missing_planning_reason(path: str, status: dict[str, Any]) -> str | None:
+def find_missing_planning_reason(
+    path: str, status: dict[str, Any]
+) -> str | None:
     """Return a deny reason when required planning reads are missing."""
     root = status.get("planning_root")
     if root is None:
         return None
-    if not path_needs_planning_gate(path, Path(str(root))):
+    if not is_planning_gate_required(path, Path(str(root))):
         return None
     missing: list[str] = []
     if status["decisions_required"] and not status["decisions_read"]:
@@ -191,7 +193,7 @@ def missing_planning_reason(path: str, status: dict[str, Any]) -> str | None:
         )
     if not missing:
         return None
-    return cite(
+    return render_cite(
         "Section 3 Item A.1",
         "",
         None,
@@ -202,7 +204,9 @@ def missing_planning_reason(path: str, status: dict[str, Any]) -> str | None:
     )
 
 
-def guest_sql_command_reason(state: dict[str, Any], command: str) -> str | None:
+def find_guest_sql_command_reason(
+    state: dict[str, Any], command: str
+) -> str | None:
     """Return a deny reason for a mutating guest SQL shell command."""
     if not command or not GUEST_SQL_CMD_RE.search(command):
         return None
@@ -210,7 +214,7 @@ def guest_sql_command_reason(state: dict[str, Any], command: str) -> str | None:
         return None
     if state.get("guest_sql_leave"):
         return None
-    return cite(
+    return render_cite(
         "Section 3 Item A.5",
         command,
         MUTATING_SQL_RE,
@@ -221,17 +225,17 @@ def guest_sql_command_reason(state: dict[str, Any], command: str) -> str | None:
     )
 
 
-def command_without_path_reason(
+def find_command_without_path_reason(
     payload: dict[str, Any],
     state: dict[str, Any],
     command: str,
 ) -> str | None:
     """Return a deny reason for a shell mutation that names no file path."""
     if WRITE_CMD_RE.search(command) and GENERIC_MODULE_RE.search(
-        posix(command)
+        normalize_posix(command)
     ):
-        if not generic_leave_covers(state, command):
-            return cite(
+        if not has_generic_leave_cover(state, command):
+            return render_cite(
                 "Section 3 Item A.2",
                 command,
                 GENERIC_MODULE_RE,
@@ -242,19 +246,21 @@ def command_without_path_reason(
     if READ_ONLY_CMD_RE.search(command):
         return None
     if WRITE_CMD_RE.search(command) and is_governed_path(command):
-        return missing_planning_reason(command, planning_status(payload, state))
+        return find_missing_planning_reason(
+            command, inspect_planning_status(payload, state)
+        )
     return None
 
 
-def ansible_shell_reason(path: str, text: str, before: str) -> str | None:
+def find_ansible_shell_reason(path: str, text: str, before: str) -> str | None:
     """Return a deny reason for a new non-idempotent Ansible shell task."""
     if not is_ansible_path(path):
         return None
-    if not added(before, text, ANSIBLE_SHELL_RE):
+    if not has_added_match(before, text, ANSIBLE_SHELL_RE):
         return None
     if ANSIBLE_IDEMPOTENT_RE.search(text):
         return None
-    return cite(
+    return render_cite(
         "Section 3 Item A.5",
         text,
         ANSIBLE_SHELL_RE,
@@ -263,20 +269,20 @@ def ansible_shell_reason(path: str, text: str, before: str) -> str | None:
     )
 
 
-def _sql_doc_exception(text: str) -> bool:
+def _has_sql_doc_exception(text: str) -> bool:
     """Return True when the text only forbids SQL rather than invoking it."""
     return bool(re.search(r"(forbid|MUST NOT|do not).{0,40}psql", text, re.I))
 
 
-def iac_sql_reason(path: str, text: str, before: str) -> str | None:
+def find_iac_sql_reason(path: str, text: str, before: str) -> str | None:
     """Return a deny reason for IaC that embeds psql or postgresql."""
     if not is_iac_path(path):
         return None
-    if not added(before, text, IAC_SQL_RE):
+    if not has_added_match(before, text, IAC_SQL_RE):
         return None
-    if _sql_doc_exception(text):
+    if _has_sql_doc_exception(text):
         return None
-    return cite(
+    return render_cite(
         "Section 3 Item A.5",
         text,
         IAC_SQL_RE,
@@ -285,15 +291,17 @@ def iac_sql_reason(path: str, text: str, before: str) -> str | None:
     )
 
 
-def mutating_sql_file_reason(path: str, text: str, before: str) -> str | None:
+def find_mutating_sql_file_reason(
+    path: str, text: str, before: str
+) -> str | None:
     """Return a deny reason for a non-IaC file that embeds mutating SQL."""
     if is_iac_path(path):
         return None
-    if not added(before, text, MUTATING_SQL_RE):
+    if not has_added_match(before, text, MUTATING_SQL_RE):
         return None
-    if _sql_doc_exception(text):
+    if _has_sql_doc_exception(text):
         return None
-    return cite(
+    return render_cite(
         "Section 3 Item A.5",
         text,
         MUTATING_SQL_RE,
@@ -302,7 +310,7 @@ def mutating_sql_file_reason(path: str, text: str, before: str) -> str | None:
     )
 
 
-def evaluate_write(
+def find_write_deny_reason(
     payload: dict[str, Any],
     path: str,
     text: str,
@@ -314,18 +322,18 @@ def evaluate_write(
     if path and is_self_path(path):
         return None
 
-    reason = guest_sql_command_reason(state, command)
+    reason = find_guest_sql_command_reason(state, command)
     if reason:
         return reason
 
     if command and not path:
-        return command_without_path_reason(payload, state, command)
+        return find_command_without_path_reason(payload, state, command)
 
     if not path:
         return None
 
-    if is_generic_module(path) and not generic_leave_covers(state, path):
-        return cite(
+    if is_generic_module(path) and not has_generic_leave_cover(state, path):
+        return render_cite(
             "Section 3 Item A.2",
             "",
             None,
@@ -334,24 +342,24 @@ def evaluate_write(
             "leave generic module.",
         )
 
-    if is_generic_module(path) and generic_leave_covers(state, path):
-        if added(before, text, HARDCODED_VAULT_PRODUCTION_RE):
-            return cite(
+    if is_generic_module(path) and has_generic_leave_cover(state, path):
+        if has_added_match(before, text, HARDCODED_VAULT_PRODUCTION_RE):
+            return render_cite(
                 "Section 3 Item A.3",
                 text,
                 HARDCODED_VAULT_PRODUCTION_RE,
                 "Generic module still cannot hardcode vault.production. "
                 "The caller binds the Vault provider.",
             )
-        if added(before, text, TAUTOLOGICAL_PROVIDER_RE):
-            return cite(
+        if has_added_match(before, text, TAUTOLOGICAL_PROVIDER_RE):
+            return render_cite(
                 "Section 3 Item A.3",
                 text,
                 TAUTOLOGICAL_PROVIDER_RE,
                 "Tautological providers map vault = vault is forbidden.",
             )
-        if added(before, text, PRODUCT_TOKEN_RE):
-            return cite(
+        if has_added_match(before, text, PRODUCT_TOKEN_RE):
+            return render_cite(
                 "Section 3 Item A.4",
                 text,
                 PRODUCT_TOKEN_RE,
@@ -359,10 +367,10 @@ def evaluate_write(
                 "resources, tags, or outputs. The caller supplies those "
                 "values.",
             )
-        if env_alias_in_generic(text) and (
-            not before or not env_alias_in_generic(before)
+        if has_env_alias_in_generic(text) and (
+            not before or not has_env_alias_in_generic(before)
         ):
-            return cite(
+            return render_cite(
                 "Section 3 Item A.3",
                 text,
                 ENV_ALIAS_RE,
@@ -370,7 +378,7 @@ def evaluate_write(
                 "such as prod, stg, or dev.",
             )
 
-    if path and introduces_bootstrapper_name(path):
+    if path and is_introduced_bootstrapper_name(path):
         return (
             "99-hook-contract.md Section 3 Item A.4. Name gate: do not create "
             "a new path that still says bootstrapper. Existing leftover paths "
@@ -379,10 +387,10 @@ def evaluate_write(
         )
 
     if is_consumer_layer(path) and (
-        added(before, text, RANDOM_PASSWORD_RE)
-        or added(before, text, VAULT_CREDENTIAL_MODULE_RE)
+        has_added_match(before, text, RANDOM_PASSWORD_RE)
+        or has_added_match(before, text, VAULT_CREDENTIAL_MODULE_RE)
     ):
-        return cite(
+        return render_cite(
             "Section 3 Item A.5 / ENGINEERING_PRINCIPLES Section 3",
             text,
             RANDOM_PASSWORD_RE
@@ -393,32 +401,34 @@ def evaluate_write(
             "This consumer layer reads a Vault path.",
         )
 
-    if added(before, text, TAUTOLOGICAL_PROVIDER_RE):
-        return cite(
+    if has_added_match(before, text, TAUTOLOGICAL_PROVIDER_RE):
+        return render_cite(
             "Section 3 Item A.3",
             text,
             TAUTOLOGICAL_PROVIDER_RE,
             "Tautological providers map vault = vault is forbidden.",
         )
 
-    if added(before, text, PROVISIONER_RE):
-        return cite(
+    if has_added_match(before, text, PROVISIONER_RE):
+        return render_cite(
             "Section 3 Item A.5",
             text,
             PROVISIONER_RE,
             "local-exec and remote-exec are forbidden in automation.",
         )
 
-    reason = ansible_shell_reason(path, text, before)
+    reason = find_ansible_shell_reason(path, text, before)
     if reason:
         return reason
-    reason = iac_sql_reason(path, text, before)
+    reason = find_iac_sql_reason(path, text, before)
     if reason:
         return reason
-    reason = mutating_sql_file_reason(path, text, before)
+    reason = find_mutating_sql_file_reason(path, text, before)
     if reason:
         return reason
 
     if is_governed_path(path):
-        return missing_planning_reason(path, planning_status(payload, state))
+        return find_missing_planning_reason(
+            path, inspect_planning_status(payload, state)
+        )
     return None

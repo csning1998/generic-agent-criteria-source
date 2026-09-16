@@ -30,7 +30,7 @@ def _is_assistant_event(event: dict) -> bool:
     return isinstance(message, dict) and message.get("role") == "assistant"
 
 
-def _content_text(content: object) -> str:
+def _extract_content_text(content: object) -> str:
     """Flatten assistant content blocks into one string."""
     if isinstance(content, str):
         return content
@@ -47,7 +47,7 @@ def _content_text(content: object) -> str:
     return "".join(parts)
 
 
-def last_assistant_text(transcript_path: str) -> str:
+def load_last_assistant_text(transcript_path: str) -> str:
     """Return the last assistant message text from a Cursor transcript."""
     if not transcript_path:
         return ""
@@ -67,13 +67,13 @@ def last_assistant_text(transcript_path: str) -> str:
             content = message.get("content", event.get("text"))
         else:
             content = event.get("text")
-        text = _content_text(content)
+        text = _extract_content_text(content)
         if text.strip():
             last = text
     return last
 
 
-def finding(text: str) -> str | None:
+def find_assistant_output_ban(text: str) -> str | None:
     """Return a short ban reason when text hits assistant-output rules."""
     if EM_DASH in text:
         return "em dash (U+2014)"
@@ -102,8 +102,8 @@ def main() -> None:
     transcript = str(
         payload.get("transcript_path") or payload.get("transcriptPath") or ""
     )
-    text = last_assistant_text(transcript)
-    hit = finding(text)
+    text = load_last_assistant_text(transcript)
+    hit = find_assistant_output_ban(text)
     if hit is None:
         print("{}")
         return

@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from adapter_install.cursor_mdc import iter_cursor_scenarios
+from adapter_install.cursor_mdc import load_cursor_scenarios
 from adapter_install.cursor_mdc import render_cursor_mdc
 
 
@@ -194,15 +194,15 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
 )
 
 
-def infer_grok_root() -> Path:
+def resolve_grok_root() -> Path:
     """Return the repository root that contains this package."""
     return Path(__file__).resolve().parents[2]
 
 
-def _cursor_specs(grok_root: Path) -> tuple[AdapterSpec, ...]:
+def _derive_cursor_specs(grok_root: Path) -> tuple[AdapterSpec, ...]:
     """Load Cursor `.mdc` specs from the language dispatch table."""
     specs: list[AdapterSpec] = []
-    for rel, parsed in iter_cursor_scenarios(grok_root):
+    for rel, parsed in load_cursor_scenarios(grok_root):
         specs.append(
             AdapterSpec(
                 source=rel,
@@ -214,12 +214,12 @@ def _cursor_specs(grok_root: Path) -> tuple[AdapterSpec, ...]:
     return tuple(specs)
 
 
-SPECS: tuple[AdapterSpec, ...] = _STATIC_SPECS + _cursor_specs(
-    infer_grok_root()
+SPECS: tuple[AdapterSpec, ...] = _STATIC_SPECS + _derive_cursor_specs(
+    resolve_grok_root()
 )
 
 
-def _spec_dests() -> frozenset[str]:
+def _extract_spec_dests() -> frozenset[str]:
     return frozenset(spec.dest for spec in SPECS)
 
 
@@ -236,7 +236,7 @@ def validate_dest_rel(dest_rel: str) -> None:
         raise ValueError(f"dest escapes home {dest_rel}")
     if not dest_rel.startswith(_ALLOWED_PREFIXES):
         raise ValueError(f"dest prefix not allowed {dest_rel}")
-    if dest_rel not in _spec_dests():
+    if dest_rel not in _extract_spec_dests():
         raise ValueError(f"dest not in allow-list {dest_rel}")
 
 
@@ -271,7 +271,7 @@ def resolve_dest(home: Path, spec: AdapterSpec) -> Path:
     return home.joinpath(*Path(spec.dest).parts)
 
 
-def _lexically_under_home(home: Path, dest: Path) -> bool:
+def _is_lexically_under_home(home: Path, dest: Path) -> bool:
     try:
         dest.relative_to(home)
     except ValueError:
@@ -279,7 +279,7 @@ def _lexically_under_home(home: Path, dest: Path) -> bool:
     return True
 
 
-def _symlink_in_ancestors(home: Path, dest: Path) -> bool:
+def _has_symlink_in_ancestors(home: Path, dest: Path) -> bool:
     cursor = dest.parent
     home_r = home.resolve()
     while cursor != home and cursor != home_r:
@@ -292,15 +292,15 @@ def _symlink_in_ancestors(home: Path, dest: Path) -> bool:
     return False
 
 
-def _dest_parent_under_home(home: Path, dest: Path) -> bool:
-    if not _lexically_under_home(home, dest):
+def _is_dest_parent_under_home(home: Path, dest: Path) -> bool:
+    if not _is_lexically_under_home(home, dest):
         return False
-    if _symlink_in_ancestors(home, dest):
+    if _has_symlink_in_ancestors(home, dest):
         return False
     return True
 
 
-def _mkdir_parents(home: Path, dest: Path) -> bool:
+def _provision_dest_parents(home: Path, dest: Path) -> bool:
     cursor = home
     try:
         rel_parts = dest.parent.relative_to(home).parts
@@ -318,11 +318,11 @@ def _mkdir_parents(home: Path, dest: Path) -> bool:
     return True
 
 
-def _file_bytes(path: Path) -> bytes:
+def _load_file_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def _walk_local(root: Path) -> tuple[Path, ...]:
+def _find_local_entries(root: Path) -> tuple[Path, ...]:
     """List entries under root. Directory symlinks are not descended."""
     if root.is_symlink() or not root.is_dir():
         return (root,)
@@ -341,12 +341,12 @@ def _walk_local(root: Path) -> tuple[Path, ...]:
     return tuple(found)
 
 
-def _iter_files(root: Path) -> tuple[Path, ...]:
+def _find_files(root: Path) -> tuple[Path, ...]:
     if root.is_file() and not root.is_dir():
         return (root,)
     files = [
         item
-        for item in _walk_local(root)
+        for item in _find_local_entries(root)
         if item.is_file() and not item.is_symlink()
     ]
     return tuple(sorted(files))
@@ -360,28 +360,28 @@ def render_expected_payload(
         if not scenario_id:
             raise ValueError("cursor render is missing scenario_id")
         return render_cursor_mdc(source, scenario_id=scenario_id)
-    return _file_bytes(source)
+    return _load_file_bytes(source)
 
 
-def are_directory_trees_identical(left: Path, right: Path) -> bool:
+def is_directory_trees_identical(left: Path, right: Path) -> bool:
     """Return True when both paths exist and hold the same file bytes."""
     if left.is_file() and right.is_file():
-        return _file_bytes(left) == _file_bytes(right)
+        return _load_file_bytes(left) == _load_file_bytes(right)
     if not left.is_dir() or not right.is_dir():
         return False
     left_map = {
-        item.relative_to(left).as_posix(): _file_bytes(item)
-        for item in _iter_files(left)
+        item.relative_to(left).as_posix(): _load_file_bytes(item)
+        for item in _find_files(left)
     }
     right_map = {
-        item.relative_to(right).as_posix(): _file_bytes(item)
-        for item in _iter_files(right)
+        item.relative_to(right).as_posix(): _load_file_bytes(item)
+        for item in _find_files(right)
     }
     return left_map == right_map
 
 
-def _remove_replaceable_tree(dest: Path) -> None:
-    children = _walk_local(dest)
+def _clear_replaceable_tree(dest: Path) -> None:
+    children = _find_local_entries(dest)
     ordered = sorted(children, key=lambda item: len(item.parts), reverse=True)
     for child in ordered:
         if child.is_symlink() or child.is_file():
@@ -403,7 +403,7 @@ def _inspect_symlink_state(dest: Path, source: Path) -> str:
     if dest.is_file() or dest.is_dir():
         return (
             "regular-same"
-            if are_directory_trees_identical(dest, source)
+            if is_directory_trees_identical(dest, source)
             else "regular-differs"
         )
     return "unexpected-type"
@@ -419,7 +419,7 @@ def _inspect_copy_state(
         expected = render_expected_payload(
             source, mode, scenario_id=scenario_id
         )
-        return "ok" if _file_bytes(dest) == expected else "copy-differs"
+        return "ok" if _load_file_bytes(dest) == expected else "copy-differs"
     return "unexpected-type"
 
 
@@ -442,7 +442,7 @@ def inspect_spec_drift(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     dest = resolve_dest(home, spec)
     if not source.exists():
         return "source-missing"
-    if not _dest_parent_under_home(home, dest):
+    if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
     state = inspect_dest_drift(
         dest, source, spec.mode, scenario_id=spec.scenario_id
@@ -452,7 +452,7 @@ def inspect_spec_drift(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     return state
 
 
-def _can_apply(state: str) -> bool:
+def _is_applyable(state: str) -> bool:
     return state in (
         "ok",
         "missing",
@@ -473,7 +473,7 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     dest = resolve_dest(home, spec)
     if not source.exists():
         return "source-missing"
-    if not _dest_parent_under_home(home, dest):
+    if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
     state = inspect_dest_drift(
         dest, source, spec.mode, scenario_id=spec.scenario_id
@@ -482,11 +482,11 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "skipped"
     if state == "regular-differs":
         return "regular-differs"
-    if not _can_apply(state):
+    if not _is_applyable(state):
         return state
-    if not _mkdir_parents(home, dest):
+    if not _provision_dest_parents(home, dest):
         return "dest-escapes"
-    if not _dest_parent_under_home(home, dest):
+    if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
     state = inspect_dest_drift(
         dest, source, spec.mode, scenario_id=spec.scenario_id
@@ -495,11 +495,11 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "skipped"
     if state == "regular-differs":
         return "regular-differs"
-    if not _can_apply(state):
+    if not _is_applyable(state):
         return state
     if spec.mode == MODE_SYMLINK:
         if dest.is_dir() and not dest.is_symlink():
-            _remove_replaceable_tree(dest)
+            _clear_replaceable_tree(dest)
         elif dest.exists() or dest.is_symlink():
             dest.unlink()
         dest.symlink_to(
@@ -512,7 +512,7 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     # missing-destination window an unlink-then-write sequence would expose
     # to a concurrent reader or filesystem watcher.
     if dest.is_dir() and not dest.is_symlink():
-        _remove_replaceable_tree(dest)
+        _clear_replaceable_tree(dest)
     fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.tmp")
     tmp = Path(tmp_name)
     try:
@@ -531,7 +531,7 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     return "applied"
 
 
-def execute_check(grok_root: Path, home: Path) -> int:
+def inspect_all_specs(grok_root: Path, home: Path) -> int:
     """Print dest status. Return 1 when any dest is not ok."""
     failed = False
     for spec in SPECS:
@@ -544,7 +544,7 @@ def execute_check(grok_root: Path, home: Path) -> int:
     return 1 if failed else 0
 
 
-def execute_apply(grok_root: Path, home: Path) -> int:
+def reconcile_all_specs(grok_root: Path, home: Path) -> int:
     """Refuse mismatched dests, then materialize. Return 1 on abort."""
     blocked: list[tuple[str, str]] = []
     for spec in SPECS:
@@ -600,12 +600,12 @@ def main(argv: list[str] | None = None) -> int:
     """Entry. check is the default verb."""
     args = parse_args(argv)
     grok_root = (
-        args.grok_root.resolve() if args.grok_root else infer_grok_root()
+        args.grok_root.resolve() if args.grok_root else resolve_grok_root()
     )
     home = args.home.resolve() if args.home else Path.home()
     if args.command == "apply":
-        return execute_apply(grok_root, home)
-    return execute_check(grok_root, home)
+        return reconcile_all_specs(grok_root, home)
+    return inspect_all_specs(grok_root, home)
 
 
 if __name__ == "__main__":

@@ -164,7 +164,7 @@ def render_scenario_bundle_text(meta: dict) -> str:
     return "\n\n".join(parts)
 
 
-def is_cursor_runtime() -> bool:
+def is_cursor_harness() -> bool:
     """Return True when this file lives under a Cursor hooks directory."""
     return "/.cursor/" in Path(__file__).resolve().as_posix()
 
@@ -173,8 +173,8 @@ def resolve_state_directory() -> Path:
     """Return the session state root for this materialized adapter."""
     if STATE_DIR is not None:
         return STATE_DIR
-    label = "cursor" if is_cursor_runtime() else "claude"
-    return Path(f"/tmp/{label}-gate-state-{os.getuid()}")
+    harness = "cursor" if is_cursor_harness() else "claude"
+    return Path(f"/tmp/{harness}-gate-state-{os.getuid()}")
 
 
 def resolve_marker_path(session_id: str, scenario_id: str) -> Path:
@@ -191,7 +191,7 @@ def is_scenario_surfaced(session_id: str, scenario_id: str) -> bool:
     return resolve_marker_path(session_id, scenario_id).exists()
 
 
-def _ensure_private_dir(path: Path) -> None:
+def _provision_private_dir(path: Path) -> None:
     """Make path a real 0o700 directory.
 
     Discards a pre-existing symlink or non-directory entry a predictable
@@ -206,8 +206,8 @@ def _ensure_private_dir(path: Path) -> None:
 def record_surfaced_scenario(session_id: str, scenario_id: str) -> None:
     """Record scenario_id as surfaced for session_id."""
     root = resolve_state_directory()
-    _ensure_private_dir(root)
-    _ensure_private_dir(root / session_id)
+    _provision_private_dir(root)
+    _provision_private_dir(root / session_id)
     resolve_marker_path(session_id, scenario_id).touch(
         mode=0o600, exist_ok=True
     )
@@ -241,12 +241,12 @@ def emit(additional_context: str, session_id: str = "unknown") -> None:
     """
     digest = hashlib.sha256(additional_context.encode("utf-8")).hexdigest()[:16]
     root = resolve_state_directory()
-    _ensure_private_dir(root)
-    _ensure_private_dir(root / session_id)
+    _provision_private_dir(root)
+    _provision_private_dir(root / session_id)
     fingerprint = root / session_id / f"emit__{digest}"
     if not claim_emit_slot(fingerprint):
         return
-    if is_cursor_runtime():
+    if is_cursor_harness():
         print(json.dumps({"additional_context": additional_context}))
         return
     payload = {
@@ -427,11 +427,11 @@ class _CommentBlockTracker:
         self._words: list[str] = []
         self._which_that_flagged = False
 
-    def reset(self) -> None:
+    def clear(self) -> None:
         self._words = []
         self._which_that_flagged = False
 
-    def observe(
+    def validate(
         self, comment_body: str, stripped: str, is_markdown: bool = False
     ) -> list[str]:
         """Fold one more comment line into the block and return findings."""
@@ -490,10 +490,10 @@ def find_register_violations(text: str, is_markdown: bool = False) -> list[str]:
                 _find_comment_body_violations(comment_body, stripped)
             )
             violations.extend(
-                block.observe(comment_body, stripped, is_markdown=is_markdown)
+                block.validate(comment_body, stripped, is_markdown=is_markdown)
             )
         else:
-            block.reset()
+            block.clear()
     return violations
 
 

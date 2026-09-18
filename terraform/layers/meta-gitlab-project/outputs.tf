@@ -1,6 +1,6 @@
 
 output "project_id" {
-  description = "Numeric identifier of the project skills-xai-supergrok."
+  description = "Numeric identifier of the project generic-agent-criteria-source."
   value       = gitlab_project.this.id
 }
 

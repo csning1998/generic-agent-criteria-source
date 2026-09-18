@@ -47,11 +47,11 @@ Fill these tables unless the owner overrode a row in this turn.
     "refactor": "type::refactor",
     "test": "type::test",
     "perf": "type::enhancement",
-    "build": "type::ad-hoc",
-    "chore": "type::ad-hoc",
-    "ci": "type::ad-hoc",
-    "revert": "type::ad-hoc",
-    "style": "type::ad-hoc"
+    "build": "type::adhoc",
+    "chore": "type::adhoc",
+    "ci": "type::adhoc",
+    "revert": "type::adhoc",
+    "style": "type::adhoc"
 }
 ```
 
@@ -61,9 +61,9 @@ Fill these tables unless the owner overrode a row in this turn.
 {
     "csning1998-lab/personal/on-premise-gitlab-deployment": "area::infrastructure",
     "csning1998-lab/meta-platform": "area::infrastructure",
-    "csning1998-lab/meta-platform-credentials": "area::infrastructure",
+    "csning1998-lab/parent-group-governance": "area::infrastructure",
     "csning1998-lab/personal/on-premise-agent": "area::infrastructure",
-    "csning1998-lab/personal/skills-xai-supergrok": "area::CI",
+    "csning1998-lab/personal/generic-agent-criteria-source": "area::CI",
     "csning1998-lab/personal/second-brain": "area::frontend",
     "csning1998-lab/personal/app-content-matter": "area::frontend",
     "csning1998-lab/personal/monte-carlo-portfolio-trader": "area::backend",

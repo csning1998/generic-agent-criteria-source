@@ -3,7 +3,7 @@ name: skill-commit-soc
 effort: medium
 description: >
     Fill batched git add and commit commands with Conventional Commit
-    headers. Apply those commands only in the skills-xai-supergrok
+    headers. Apply those commands only in the generic-agent-criteria-source
     tree. Elsewhere print the commands. Use when the owner asks to
     commit in SoC batches, or runs /skill-commit-soc.
 metadata:
@@ -31,8 +31,8 @@ Read `~/.grok/skills/modules/shared/write-gate.md`.
 2. Group paths so each commit is one concern. Do not mix packaging, hook code, tests, CI, and docs in one commit.
 3. Fill one header per batch. Format is `type(scope): description`. Total character count is less than 100. No body. Types follow `@commitlint/config-conventional`. Match existing headers in the repo log.
 4. Set `execute` to true only when all of the following hold.
-   1. The owner asked to commit in this turn.
-   2. `git rev-parse --show-toplevel` is `$HOME/.grok`, or `origin` contains `skills-xai-supergrok`.
+    1. The owner asked to commit in this turn.
+    2. `git rev-parse --show-toplevel` is `$HOME/.grok`, or `origin` contains `generic-agent-criteria-source`.
 5. Otherwise set `execute` to false.
 6. Set `allow_push` to false always.
 7. Write `/tmp/skill-commit-soc/<run>/input.json` with mode `0700`.
@@ -48,7 +48,7 @@ Artifact `GitCommitResult` (same JSON as the module). When `execute` is false, r
 
 - [ ] Each commit message matches `type(scope): description` and is under 100 characters
 - [ ] `allow_push` is false
-- [ ] `execute` is true only for skills-xai-supergrok after an ask in this turn
+- [ ] `execute` is true only for generic-agent-criteria-source after an ask in this turn
 - [ ] `git push` was not invoked
 
 ## Backtrack Triggers

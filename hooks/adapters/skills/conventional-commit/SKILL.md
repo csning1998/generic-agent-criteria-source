@@ -3,7 +3,7 @@ name: conventional-commit
 description: >
     Draft Conventional Commit headers of the form type(scope): description.
     Use when the owner asks for a commit message, Conventional Commit, or /commit
-    outside the skills-xai-supergrok SoC batch flow.
+    outside the generic-agent-criteria-source SoC batch flow.
 when-to-use: commit message, Conventional Commit, git commit
 ---
 

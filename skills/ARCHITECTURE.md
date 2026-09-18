@@ -81,7 +81,7 @@ Task fill lives in `skill-sync-gitlab-mrs-to-notion` and `tasks.md`. Label mappi
 - Modules: `skill-module-update-antigravity`, `skill-module-git-commit`
 - Artifacts: `AntigravityResult`, `GitCommitResult`
 
-`skill-commit-soc` fills SoC commit batches. The module applies `git add` and `git commit` only when the layer sets `execute` true for skills-xai-supergrok. The module never runs `git push`.
+`skill-commit-soc` fills SoC commit batches. The module applies `git add` and `git commit` only when the layer sets `execute` true for generic-agent-criteria-source. The module never runs `git push`.
 
 ### Item F. Architecture documents
 

@@ -1,5 +1,5 @@
 [project]
-name = "skills-xai-supergrok"
+name = "generic-agent-criteria-source"
 version = "0.1.0"
 description = "Owner Grok skills, hooks, and Second Brain documentation."
 readme = "README-Repository.md"
@@ -41,10 +41,7 @@ exclude = [
 select = ["E", "W", "F", "I", "D"]
 
 # Ignored rules
-ignore = [
-  "D100",
-  "D104",
-]
+ignore = ["D100", "D104"]
 
 [tool.ruff.lint.pydocstyle]
 # Enforce Google style docstrings
@@ -74,4 +71,3 @@ extraPaths = [
   "skills/skill-module-gitlab-mr-labels/scripts",
   "skills/skill-update-antigravity/scripts",
 ]
-

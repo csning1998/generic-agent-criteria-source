@@ -13,9 +13,9 @@ terraform {
   }
 
   backend "http" {
-    address        = "https://gitlab.com/api/v4/projects/85419450/terraform/state/meta-gitlab-project"
-    lock_address   = "https://gitlab.com/api/v4/projects/85419450/terraform/state/meta-gitlab-project/lock"
-    unlock_address = "https://gitlab.com/api/v4/projects/85419450/terraform/state/meta-gitlab-project/lock"
+    address        = "https://gitlab.com/api/v4/projects/85419450/terraform/state/generic-agent-criteria-source"
+    lock_address   = "https://gitlab.com/api/v4/projects/85419450/terraform/state/generic-agent-criteria-source/lock"
+    unlock_address = "https://gitlab.com/api/v4/projects/85419450/terraform/state/generic-agent-criteria-source/lock"
     lock_method    = "POST"
     unlock_method  = "DELETE"
     retry_wait_min = 5
@@ -27,12 +27,7 @@ provider "gitlab" {
 }
 
 provider "vault" {
-  address      = "https://127.0.0.1:8200"
-  ca_cert_file = pathexpand("~/GitLab/meta-platform/vault/tls/ca.pem")
-  token        = local.vault_token
-}
-
-locals {
-  # Vault CLI's own token-helper file. Authenticating to Vault cannot depend on a secret stored in Vault.
-  vault_token = trimspace(file(pathexpand("~/.vault-token")))
+  address      = module.contexts_local_credential.bastion_vault_config.endpoint
+  ca_cert_file = module.contexts_local_credential.bastion_vault_config.ca_cert_path
+  token        = module.contexts_local_credential.bastion_vault_config.token_path
 }

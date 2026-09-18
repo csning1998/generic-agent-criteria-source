@@ -69,7 +69,7 @@ Disciplinary markdown still exists. It is not sufficient as context-only self-ch
 
 1. Claude Code `Stop` payload and whether it exposes the last assistant message.
 2. Antigravity global skills path after a symlink from `~/.grok/skills/`.
-3. Whether Sonar should be added to `skills-xai-supergrok` `.gitlab-ci.yml`.
+3. Whether Sonar should be added to `generic-agent-criteria-source` `.gitlab-ci.yml`.
 
 ## Section 6. Tracked idempotency gaps
 

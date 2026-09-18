@@ -18,6 +18,7 @@
 !/.gitlab/**
 !/.vscode/
 !/.vscode/**
+!/commitlint.config.cjs
 
 # User skills consumed by Grok.
 !/skills/
@@ -68,3 +69,4 @@ hooks/state
 
 __pycache__/
 *.egg-info/
+terraform/layers/meta-gitlab-project/tls/bastion-ca.pem

@@ -11,7 +11,7 @@ def _cfg() -> dict:
     return {
         "allowlist": [
             "type::feature",
-            "type::ad-hoc",
+            "type::adhoc",
             "type::fix",
             "area::CI",
             "area::infrastructure",
@@ -19,11 +19,11 @@ def _cfg() -> dict:
         ],
         "type_from_conv": {
             "feat": "type::feature",
-            "ci": "type::ad-hoc",
+            "ci": "type::adhoc",
             "fix": "type::fix",
         },
         "repo_area": {
-            "csning1998-lab/personal/skills-xai-supergrok": "area::CI"
+            "csning1998-lab/personal/generic-agent-criteria-source": "area::CI"
         },
         "area_patterns": [
             {
@@ -44,7 +44,7 @@ def test_feat_hooks_is_infrastructure_and_feature() -> None:
     labels = compute_labels(
         "feat(hooks): add IaC collaboration gate",
         ["security"],
-        "csning1998-lab/personal/skills-xai-supergrok",
+        "csning1998-lab/personal/generic-agent-criteria-source",
         _cfg(),
     )
     assert labels == [
@@ -59,10 +59,10 @@ def test_ci_title_without_terraform_uses_repo_area() -> None:
     labels = compute_labels(
         "ci: add markdownlint job",
         [],
-        "csning1998-lab/personal/skills-xai-supergrok",
+        "csning1998-lab/personal/generic-agent-criteria-source",
         _cfg(),
     )
-    assert "type::ad-hoc" in labels
+    assert "type::adhoc" in labels
     assert "area::CI" in labels
 
 

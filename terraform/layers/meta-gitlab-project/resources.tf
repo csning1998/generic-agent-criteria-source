@@ -1,12 +1,17 @@
 
 module "contexts_local_credential" {
   source  = "gitlab.com/csning1998-lab/contexts-local-credential/gitlab"
-  version = "0.1.2"
+  version = "0.3.1"
 }
 
 ephemeral "vault_kv_secret_v2" "state_backend" {
   mount = "secret"
-  name  = "parent-group-governance/state-backend"
+  name  = "parent-group-governance/terraform/state-backend"
+}
+
+ephemeral "vault_kv_secret_v2" "github_publication" {
+  mount = "secret"
+  name  = "parent-group-governance/github/publication"
 }
 
 data "gitlab_group" "personal" {
@@ -40,4 +45,31 @@ resource "gitlab_branch_protection" "main" {
   allowed_to_merge = [{ access_level = "maintainer" }]
 
   allow_force_push = false
+}
+
+module "github_mirror" {
+  source  = "gitlab.com/csning1998-lab/provisioner-github-mirror/gitlab"
+  version = "0.3.1"
+
+  gitlab_project_id = gitlab_project.this.id
+
+  github_repository = {
+    name  = gitlab_project.this.name
+    owner = var.github_owner
+  }
+}
+
+import {
+  to = module.github_mirror.github_repository.this
+  id = "generic-agent-criteria-source"
+}
+
+import {
+  to = module.github_mirror.gitlab_project_push_mirror.this
+  id = "85419450:4102493"
+}
+
+import {
+  to = module.github_mirror.github_repository_deploy_key.this
+  id = "generic-agent-criteria-source:160794534"
 }

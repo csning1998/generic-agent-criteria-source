@@ -47,6 +47,14 @@ resource "gitlab_branch_protection" "main" {
   allow_force_push = false
 }
 
+module "code_reviewer" {
+  source  = "gitlab.com/csning1998-lab/provisioner-code-reviewer/gitlab"
+  version = "~> 1.7.1"
+
+  gitlab_project_id    = gitlab_project.this.id
+  legacy_alias_enabled = true
+}
+
 module "github_mirror" {
   source  = "gitlab.com/csning1998-lab/provisioner-github-mirror/gitlab"
   version = "0.3.1"

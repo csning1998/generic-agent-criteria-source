@@ -74,7 +74,7 @@ module "workload_identity_federation" {
 
 module "code_reviewer" {
   source    = "gitlab.com/csning1998-lab/provisioner-code-reviewer/gitlab"
-  version   = "~> 1.7.1"
+  version   = "1.7.1"
   providers = { vault = vault.bastion }
 
   gitlab_project_id    = gitlab_project.this.id

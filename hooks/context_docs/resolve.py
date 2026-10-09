@@ -16,7 +16,7 @@ _USAGE = (
 )
 
 
-def _fail(context_id: str, error: str) -> dict[str, object]:
+def _derive_failure(context_id: str, error: str) -> dict[str, object]:
     """Return a failed resolve result."""
     return {
         "ok": False,
@@ -26,7 +26,7 @@ def _fail(context_id: str, error: str) -> dict[str, object]:
     }
 
 
-def _section(
+def _extract_context_section(
     loaded: dict[str, object], context_id: str
 ) -> dict[str, object] | str:
     """Return the context table, or an error string."""
@@ -39,7 +39,7 @@ def _section(
     return section
 
 
-def _required_names(
+def _extract_required_names(
     section: dict[str, object], context_id: str
 ) -> tuple[str, ...] | str:
     """Return required file names, or an error string."""
@@ -59,28 +59,32 @@ def resolve_context_docs_root(
 ) -> dict[str, object]:
     """Return ok, an absolute docs_root, and error for context_id."""
     if not config_path.is_file():
-        return _fail(context_id, _MISSING_CONFIG)
+        return _derive_failure(context_id, _MISSING_CONFIG)
     try:
         loaded = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError:
-        return _fail(context_id, f"context.{context_id} is absent")
+        return _derive_failure(context_id, f"context.{context_id} is absent")
     if not isinstance(loaded, dict):
-        return _fail(context_id, f"context.{context_id} is absent")
-    section = _section(loaded, context_id)
+        return _derive_failure(context_id, f"context.{context_id} is absent")
+    section = _extract_context_section(loaded, context_id)
     if isinstance(section, str):
-        return _fail(context_id, section)
+        return _derive_failure(context_id, section)
     raw = section.get("docs_root")
     if not isinstance(raw, str) or not raw.strip():
-        return _fail(context_id, f"context.{context_id}.docs_root is absent")
-    names = _required_names(section, context_id)
+        return _derive_failure(
+            context_id, f"context.{context_id}.docs_root is absent"
+        )
+    names = _extract_required_names(section, context_id)
     if isinstance(names, str):
-        return _fail(context_id, names)
+        return _derive_failure(context_id, names)
     docs = Path(raw).expanduser().resolve()
     if not docs.is_dir():
-        return _fail(context_id, _MISSING_DIR)
+        return _derive_failure(context_id, _MISSING_DIR)
     for name in names:
         if not (docs / name).is_file():
-            return _fail(context_id, f"required file is absent: {name}")
+            return _derive_failure(
+                context_id, f"required file is absent: {name}"
+            )
     return {
         "ok": True,
         "context_id": context_id,
@@ -89,7 +93,7 @@ def resolve_context_docs_root(
     }
 
 
-def _socket_fail(socket_id: str, error: str) -> dict[str, object]:
+def _derive_socket_failure(socket_id: str, error: str) -> dict[str, object]:
     """Return a failed catalog socket result."""
     return {
         "ok": False,
@@ -106,41 +110,55 @@ def resolve_catalog_socket(
 ) -> dict[str, object]:
     """Return the pack skill declared for socket_id."""
     if not config_path.is_file():
-        return _socket_fail(socket_id, _MISSING_CONFIG)
+        return _derive_socket_failure(socket_id, _MISSING_CONFIG)
     try:
         loaded = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError:
-        return _socket_fail(socket_id, f"socket.{socket_id} is absent")
+        return _derive_socket_failure(
+            socket_id, f"socket.{socket_id} is absent"
+        )
     if not isinstance(loaded, dict):
-        return _socket_fail(socket_id, f"socket.{socket_id} is absent")
+        return _derive_socket_failure(
+            socket_id, f"socket.{socket_id} is absent"
+        )
     sockets = loaded.get("socket")
     if not isinstance(sockets, dict):
-        return _socket_fail(socket_id, f"socket.{socket_id} is absent")
+        return _derive_socket_failure(
+            socket_id, f"socket.{socket_id} is absent"
+        )
     socket = sockets.get(socket_id)
     if not isinstance(socket, dict):
-        return _socket_fail(socket_id, f"socket.{socket_id} is absent")
+        return _derive_socket_failure(
+            socket_id, f"socket.{socket_id} is absent"
+        )
     pack = socket.get("pack")
     skill = socket.get("skill")
     if not isinstance(pack, str) or not pack.strip():
-        return _socket_fail(socket_id, f"socket.{socket_id}.pack is absent")
+        return _derive_socket_failure(
+            socket_id, f"socket.{socket_id}.pack is absent"
+        )
     if not isinstance(skill, str) or not skill.strip():
-        return _socket_fail(socket_id, f"socket.{socket_id}.skill is absent")
-    section = _section(loaded, pack)
+        return _derive_socket_failure(
+            socket_id, f"socket.{socket_id}.skill is absent"
+        )
+    section = _extract_context_section(loaded, pack)
     if isinstance(section, str):
-        return _socket_fail(socket_id, section)
+        return _derive_socket_failure(socket_id, section)
     listed = section.get("skills")
     if not isinstance(listed, list) or skill not in listed:
-        return _socket_fail(
+        return _derive_socket_failure(
             socket_id, f"socket.{socket_id}.skill is absent from the pack"
         )
     raw_path = section.get("skills_path")
     if not isinstance(raw_path, str) or not raw_path.strip():
-        return _socket_fail(
+        return _derive_socket_failure(
             socket_id, f"context.{pack}.skills_path is absent"
         )
     skills_path = Path(raw_path).expanduser().resolve()
     if not skills_path.is_dir():
-        return _socket_fail(socket_id, "skills_path directory is absent")
+        return _derive_socket_failure(
+            socket_id, "skills_path directory is absent"
+        )
     return {
         "ok": True,
         "socket_id": socket_id,
@@ -151,7 +169,7 @@ def resolve_catalog_socket(
     }
 
 
-def catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
+def resolve_catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
     """Return declared skill name to source path, or an error string."""
     if not config_path.is_file():
         return {}
@@ -197,9 +215,14 @@ def catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
     return sources
 
 
-def _arguments(args: list[str]) -> tuple[Path, str, str] | str:
+def resolve_catalog_path(grok_root: Path) -> Path:
+    """Return the catalog file in the repository."""
+    return grok_root / "config" / "contexts.toml"
+
+
+def _parse_cli_arguments(args: list[str]) -> tuple[Path, str, str] | str:
     """Return config path, mode, and id, or a usage error."""
-    config = Path.home() / ".grok" / "contexts.toml"
+    config = resolve_catalog_path(Path(__file__).resolve().parents[2])
     context_id = ""
     socket_id = ""
     index = 0
@@ -231,9 +254,9 @@ def _arguments(args: list[str]) -> tuple[Path, str, str] | str:
 def main(argv: list[str] | None = None) -> int:
     """Print one JSON object and return 0 or 1."""
     args = list(sys.argv[1:] if argv is None else argv)
-    parsed = _arguments(args)
+    parsed = _parse_cli_arguments(args)
     if isinstance(parsed, str):
-        print(json.dumps(_fail("", parsed)))
+        print(json.dumps(_derive_failure("", parsed)))
         return 1
     config, mode, name = parsed
     if mode == "socket":

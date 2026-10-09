@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from adapter_install.install import MODE_COPY
+from adapter_install.install import MODE_SYMLINK
 from adapter_install.install import SPECS
 from adapter_install.install import AdapterSpec
 from adapter_install.install import _clear_replaceable_tree
@@ -192,19 +193,24 @@ def test_identical_skills_directory_becomes_per_skill_symlinks(
         assert link.resolve() == child.resolve()
 
 
-def test_catalog_skill_links_beside_repo_skills(tmp_path: Path) -> None:
+def test_catalog_skill_links_beside_repo_skills(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A catalog skills list adds one symlink and keeps repo skill links."""
     home = tmp_path / "home"
     pack_skill = tmp_path / "pack" / "skill-sample"
     pack_skill.mkdir(parents=True)
     (pack_skill / "SKILL.md").write_text("sample\n", encoding="utf-8")
-    catalog = home / ".grok" / "contexts.toml"
-    catalog.parent.mkdir(parents=True)
+    catalog = tmp_path / "contexts.toml"
     catalog.write_text(
         "[context.sample]\n"
         f'skills_path = "{pack_skill.parent}"\n'
         'skills = ["skill-sample"]\n',
         encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "adapter_install.install.resolve_catalog_path",
+        lambda grok_root: catalog,
     )
     spec = next(s for s in SPECS if s.dest == ".grok/skills")
     assert reconcile_spec(_repo_root(), home, spec) == "applied"
@@ -216,6 +222,18 @@ def test_catalog_skill_links_beside_repo_skills(tmp_path: Path) -> None:
     assert repo_skill.resolve() == (
         _repo_root() / "skills" / "skill-yt-dlp"
     ).resolve()
+
+
+def test_contexts_toml_symlinks_for_grok_claude_and_agy() -> None:
+    """The catalog file is one symlink for Grok, Claude, and Antigravity."""
+    specs = [spec for spec in SPECS if spec.source == "config/contexts.toml"]
+    dests = {spec.dest for spec in specs}
+    assert dests == {
+        ".grok/contexts.toml",
+        ".claude/contexts.toml",
+        ".gemini/contexts.toml",
+    }
+    assert all(spec.mode == MODE_SYMLINK for spec in specs)
 
 
 def test_default_command_is_check(tmp_path: Path) -> None:

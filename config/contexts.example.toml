@@ -1,13 +1,8 @@
-# Catalog template. Copy to ~/.grok/contexts.toml.
+# Blank catalog template. The filled catalog is config/contexts.toml.
 # One context table declares one external pack.
-# One socket table names the pack and the layer skill.
 
 [context.example]
 docs_root = ""
 required = []
 skills_path = ""
 skills = []
-
-[socket.example]
-pack = "example"
-skill = ""

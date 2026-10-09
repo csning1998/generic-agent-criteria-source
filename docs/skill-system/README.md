@@ -2,7 +2,7 @@
 
 Agent reads this tree before writing or changing a `skill-*` or `skill-module-*` file.
 
-The catalog is `~/.grok/contexts.toml`. The template is `config/contexts.example.toml`. One `[context.<id>]` table declares one external pack. One `[socket.<id>]` table names the pack and the layer skill. This tree records pack ids and socket ids. Pack repositories stay outside this tree. This tree is the skill writing contract. This tree is not a Notion locate path.
+The catalog file is `config/contexts.toml`. The blank template is `config/contexts.example.toml`. One `[context.<id>]` table declares one external pack. This tree is the skill writing contract. This tree is not a Notion locate path.
 
 The Input, Output, Validation, and Backtrack section names come from ForceInjection `domain-driven-design-skills` under Apache License 2.0. Source repository: `https://github.com/ForceInjection/domain-driven-design-skills`. Copied English files live in `reference/`. The file map and APA list are in `reference/NOTICE.md`. Layer, module, `/tmp` payload, effort roles, and The Algorithm are owner work.
 

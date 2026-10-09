@@ -53,6 +53,10 @@ hooks/state
 !/config/
 !/config/contexts.example.toml
 
+# Local Python lint, pytest, and SonarQube scan.
+!/pytest.sh
+!/merge-request.md
+
 # Personal workstation SELinux playbooks. Not consumed by Grok at runtime.
 !/ansible/
 !/ansible/**

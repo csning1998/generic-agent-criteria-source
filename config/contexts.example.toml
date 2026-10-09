@@ -1,6 +1,7 @@
 # Copy to ~/.grok/contexts.toml. Grok /settings writes ~/.grok/config.toml.
-# docs_root contains the five contract files named in resolve.py.
+# Each context.<id> table supplies docs_root and required.
 
-[context.second-brain]
+[context.example]
 docs_root = ""
+required = []
 skills_path = ""

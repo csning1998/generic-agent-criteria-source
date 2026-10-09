@@ -1,0 +1,6 @@
+# Copy to ~/.grok/contexts.toml. Grok /settings writes ~/.grok/config.toml.
+# docs_root contains the five contract files named in resolve.py.
+
+[context.second-brain]
+docs_root = ""
+skills_path = ""

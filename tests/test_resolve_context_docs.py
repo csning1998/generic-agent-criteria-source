@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from context_docs.resolve import main
+from context_docs.resolve import resolve_catalog_socket
 from context_docs.resolve import resolve_context_docs_root
 
 
@@ -115,3 +116,52 @@ def test_main_with_missing_config_exits_1_and_prints_ok_false(
     assert payload["context_id"] == "sample"
     assert payload["docs_root"] is None
     assert payload["error"] == "config file is absent"
+
+
+def test_resolve_catalog_socket_with_listed_skill_returns_skills_path(
+    tmp_path: Path,
+) -> None:
+    """A socket whose skill is listed on the pack returns that skill."""
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    config = tmp_path / "contexts.toml"
+    config.write_text(
+        "[socket.media-sequence]\n"
+        'pack = "sample"\n'
+        'skill = "skill-sample"\n'
+        "\n"
+        "[context.sample]\n"
+        f'skills_path = "{skills}"\n'
+        'skills = ["skill-sample"]\n',
+        encoding="utf-8",
+    )
+    result = resolve_catalog_socket(config, "media-sequence")
+    assert result["ok"] is True
+    assert result["socket_id"] == "media-sequence"
+    assert result["pack"] == "sample"
+    assert result["skill"] == "skill-sample"
+    assert result["skills_path"] == str(skills.resolve())
+    assert result["error"] is None
+
+
+def test_resolve_catalog_socket_when_skill_unlisted_returns_ok_false(
+    tmp_path: Path,
+) -> None:
+    """A socket skill absent from the pack list yields ok false."""
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    config = tmp_path / "contexts.toml"
+    config.write_text(
+        "[socket.task-fill]\n"
+        'pack = "sample"\n'
+        'skill = "skill-other"\n'
+        "\n"
+        "[context.sample]\n"
+        f'skills_path = "{skills}"\n'
+        'skills = ["skill-sample"]\n',
+        encoding="utf-8",
+    )
+    result = resolve_catalog_socket(config, "task-fill")
+    assert result["ok"] is False
+    assert result["skill"] is None
+    assert result["error"] == "socket.task-fill.skill is absent from the pack"

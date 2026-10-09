@@ -6,7 +6,7 @@ description: >
     contract (iid, title, web_url, merged_at, description). Use when the
     user asks to inspect, list, or pull GitLab MRs, or runs
     /skill-inspect-gitlab-mrs. Read-only. The write layer is
-    skill-sync-gitlab-mrs-to-notion in the Second Brain repository.
+    catalog socket task-fill.
 metadata:
     short-description: "List GitLab MRs via glab"
 ---

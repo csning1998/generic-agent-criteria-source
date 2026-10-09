@@ -2,7 +2,7 @@
 
 Agent reads this tree before writing or changing a `skill-*` or `skill-module-*` file.
 
-Second Brain stays in `../second-brain/`. This tree is the skill writing contract. It is not a Notion locate path.
+The Second Brain contract is an external context. `docs_root` comes from `~/.grok/contexts.toml`. This tree is the skill writing contract. This tree is not a Notion locate path.
 
 The Input, Output, Validation, and Backtrack section names come from ForceInjection `domain-driven-design-skills` under Apache License 2.0. Source repository: `https://github.com/ForceInjection/domain-driven-design-skills`. Copied English files live in `reference/`. The file map and APA list are in `reference/NOTICE.md`. Layer, module, `/tmp` payload, effort roles, and The Algorithm are owner work.
 
@@ -31,7 +31,7 @@ A layer `SKILL.md` uses these sections. Source is `reference/docs/ddd-skill-syst
 6. Backtrack Triggers
 7. Example
 
-A later skill consumes a named artifact. It does not reopen an upstream module to recompute a field.
+A later skill consumes a named artifact. The later skill does not reopen an upstream module to recompute a field.
 
 ## Section 3. Owner flavor
 
@@ -39,7 +39,7 @@ A later skill consumes a named artifact. It does not reopen an upstream module t
 
 Apply these five steps in order on every change. Do not skip to a later step.
 
-1. Question every requirement. Name who asked for it in this workspace.
+1. Question every requirement. Name who asked for the requirement in this workspace.
 2. Delete any part or step that is not required.
 3. Simplify what remains.
 4. Accelerate cycle time.
@@ -51,7 +51,7 @@ A retrospective that lists five next patches has skipped step 2.
 
 A `skill-*` that calls module skills is a layer.
 
-The layer owns variable names, fill rules, and the Notion (or later gRPC) property list. It collects each module JSON and builds the next module input.
+The layer owns variable names, fill rules, and the Notion (or later gRPC) property list. The layer collects each module JSON and builds the next module input.
 
 Every layer `SKILL.md` MUST set frontmatter `effort` to `low`, `medium`, or `high`. That value is the spawn budget for delegated work. The parent GUI session may stay on high or extra high.
 
@@ -68,11 +68,11 @@ Do not spawn bare `general-purpose` for `low` or `medium`. That child inherits t
 ### Item C. Module
 
 - A module `SKILL.md` MUST set `effort: low`.
-- A `skill-module-*` file receives JSON. It maps that JSON onto one tool (yt-dlp, Buzz, Notion MCP, later an HTTP or gRPC client) and returns JSON.
+- A `skill-module-*` file receives JSON. The module maps that JSON onto one tool (yt-dlp, Buzz, Notion MCP, later an HTTP or gRPC client) and returns JSON.
 - **A MODULE MUST BE ONLY STATELESS.**
-    - It MUST NOT bake collection IDs, group paths, mapping tables, or owner home paths into its contract. Input examples use placeholders the layer replaces.
+    - The module MUST NOT bake collection IDs, group paths, mapping tables, or owner home paths into the module contract. Input examples use placeholders the layer replaces.
     - A module MUST NOT decide Title, Author, Published, Description, content, or relation targets.
-    - A module MUST NOT read Second Brain to invent fill values.
+    - A module MUST NOT read a context contract to invent fill values.
 
 ### Item D. Isolation
 
@@ -83,6 +83,8 @@ If the owner later replaces Notion with a self-hosted API, only the write module
 ## Section 4. Transcribe YouTube video to Notion Resources handoff
 
 Layer is one `skill-*` that sequences three modules.
+
+The sequencing layer file is `skill-transcribe-youtube-video-to-notion-resources` in the Second Brain repository.
 
 1. Layer fills yt-dlp input JSON (`url`, `mode`, `outdir`). Module returns JSON (`media_path`, `watch_url`, tags if present).
 2. Layer fills Buzz input JSON (`media_path`, `model_type`, `model_size`, `language`). Module returns JSON (`transcript_path`, `exit_code`).
@@ -112,7 +114,7 @@ When a run fails or the owner corrects a boundary, patch the file that owns the 
 | ------------------ | ------------------------------ |
 | Wrong fill         | The layer skill                |
 | Wrong tool flags   | The module skill               |
-| Notion entity rule | `../second-brain/` entity file |
+| Notion entity rule | the entity file under `docs_root` |
 
 ## Section 6. Load order when editing skills
 

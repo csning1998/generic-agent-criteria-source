@@ -8,7 +8,7 @@ description: >
     planning after a merge request, or runs
     /skill-update-architecture-docs. Default is list-only. Writing
     requires an explicit ask in the current turn. Notion Task fill
-    stays in /skill-sync-gitlab-mrs-to-notion.
+    stays in skill-sync-gitlab-mrs-to-notion in the Second Brain repository.
 metadata:
     short-description: "Write adjudicated facts into planning docs"
 ---
@@ -34,11 +34,11 @@ Default file names match `skill-inspect-architecture-docs`.
 ## Process
 
 1. If this turn has no update ask, keep read-only and stop.
-2. If `planning_root` is missing, ask for it and stop.
+2. If `planning_root` is missing, ask for `planning_root` and stop.
 3. If there is no `ArchitectureConflictReport` and the owner did not state a decision in this turn, run `skill-inspect-architecture-docs` first. Stop on any `open` finding.
 4. Write the fact once into the adjudication file. Other planning files may cite that name or drop the stale sentence. Do not paste the same paragraph into every topic file.
 5. Edit only files under `planning_root`. Do not edit a repository `documentation/` tree, or any other verified-implementation directory, unless the owner said the implementation was already verified in this turn.
-6. When the owner asked to archive a merged GitLab merge request, call `skill-sync-gitlab-mrs-to-notion`. Do not fill Task properties in this layer.
+6. When the owner asked to archive a merged GitLab merge request, call `skill-sync-gitlab-mrs-to-notion` in the Second Brain repository. Do not fill Task properties in this layer.
 7. When the owner asked to archive a discussion that has no merge request, stop and ask which existing write layer to use. Do not invent a second Task fill table.
 
 ## Output

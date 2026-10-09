@@ -33,15 +33,13 @@
 !/hooks/**
 hooks/state
 
-# User Second Brain documentation and markdown linters.
+# Markdown linters, coding standards, and the skill-system contract.
 !/docs/
 /docs/*
 !/docs/.markdownlint.json
 !/docs/.mdlrc
 !/docs/coding-standards/
 !/docs/coding-standards/**
-!/docs/second-brain/
-!/docs/second-brain/**
 !/docs/skill-system/
 !/docs/skill-system/**
 

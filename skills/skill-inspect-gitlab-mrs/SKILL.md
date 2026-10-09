@@ -6,7 +6,7 @@ description: >
     contract (iid, title, web_url, merged_at, description). Use when the
     user asks to inspect, list, or pull GitLab MRs, or runs
     /skill-inspect-gitlab-mrs. Read-only. The write layer is
-    /skill-sync-gitlab-mrs-to-notion.
+    skill-sync-gitlab-mrs-to-notion in the Second Brain repository.
 metadata:
     short-description: "List GitLab MRs via glab"
 ---
@@ -25,7 +25,7 @@ The owner asked to list or inspect merge requests.
 
 ## Process
 
-1. If the target is missing, ask for it.
+1. If the target is missing, ask for the target.
 2. Fill module JSON and call `~/.grok/skills/skill-module-inspect-gitlab-mrs/SKILL.md`.
 
 ```json

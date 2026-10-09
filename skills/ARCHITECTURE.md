@@ -2,7 +2,7 @@
 
 Read `~/.grok/docs/skill-system/README.md` before editing a skill. Upstream source and the reference list are `~/.grok/docs/skill-system/reference/NOTICE.md`.
 
-A `skill-*` file is a layer. It fills JSON and owns field names. A `skill-module-*` file is stateless. It receives JSON, maps that JSON onto one tool, and returns JSON. It MUST NOT bake collection IDs, group paths, mapping tables, or owner home paths. Second Brain is the ubiquitous language for Notion entities. Identifiers live in `docs/second-brain/03-identifiers.md` and are copied by the layer.
+A `skill-*` file is a layer. The layer fills JSON and owns field names. A `skill-module-*` file is stateless. The module receives JSON, maps that JSON onto one tool, and returns JSON. The module MUST NOT bake collection IDs, group paths, mapping tables, or owner home paths. A context contract is an external `docs_root`. Identifiers live in `03-identifiers.md` under that `docs_root`. The layer copies that ID.
 
 ## Section 1. Contract
 
@@ -16,7 +16,7 @@ Every layer and every module uses these sections:
 6. Backtrack Triggers
 7. Example
 
-A later layer consumes a named artifact. It does not reopen an upstream module to recompute a field.
+A later layer consumes a named artifact. The later layer does not reopen an upstream module to recompute a field.
 
 If the Notion API changes, only `skill-module-file-notion-resources` changes. yt-dlp and Buzz modules stay untouched.
 
@@ -33,24 +33,23 @@ Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.g
 
 ### Item A. Media ingest
 
-- Layers: `skill-yt-dlp`, `skill-buzz-transcribe`, `skill-transcribe-youtube-video-to-notion-resources`
+- Layers: `skill-yt-dlp`, `skill-buzz-transcribe`
 - Modules: `skill-module-yt-dlp`, `skill-module-buzz-transcribe`, `skill-module-media-tags`
 - Artifacts: `WatchMedia`, `TranscriptDone`, `MediaTags`, `VideoResourcePayload`
 
-`skill-transcribe-youtube-video-to-notion-resources` sequences download, transcribe, and Notion write. YouTube fill lives only in that layer.
+`skill-transcribe-youtube-video-to-notion-resources` lives in the Second Brain repository. `skill-transcribe-youtube-video-to-notion-resources` sequences download, transcribe, and Notion write. YouTube fill lives only in `skill-transcribe-youtube-video-to-notion-resources`.
 
 ### Item B. Knowledge filing
 
-- Layers: `skill-inspect-second-brain`, `skill-file-notion-resources`
 - Modules: `skill-module-inspect-second-brain`, `skill-module-file-notion-resources`
 - Artifacts: `SecondBrainLocate`, `ResourceFiled`, `NotionWriteResult`
+
+`skill-inspect-second-brain` and `skill-file-notion-resources` live in the Second Brain repository.
 
 ### Item C. Delivery
 
 - Layers
     - `skill-inspect-gitlab-mrs`
-    - `skill-inspect-notion-tasks`
-    - `skill-sync-gitlab-mrs-to-notion`
     - `skill-apply-gitlab-mr-labels`
     - `skill-review-gitlab-mr-comments`
 - Modules
@@ -67,13 +66,14 @@ Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.g
     - `GitlabMrCommentTriageResult`
     - `GitlabMrDiscussionsResult`
 
-Task fill lives in `skill-sync-gitlab-mrs-to-notion` and `tasks.md`. Label mapping tables live in `skill-apply-gitlab-mr-labels`. Verdict evidence and the reply/resolve gate live in `skill-review-gitlab-mr-comments`; that layer hands SoC commit batching to `skill-commit-soc` rather than owning it twice.
+Task fill lives in `skill-sync-gitlab-mrs-to-notion` in the Second Brain repository, and in `tasks.md` under `docs_root`. Label mapping tables live in `skill-apply-gitlab-mr-labels`. Verdict evidence and the reply/resolve gate live in `skill-review-gitlab-mr-comments`. `skill-review-gitlab-mr-comments` hands SoC commit batching to `skill-commit-soc`.
 
 ### Item D. Workspace
 
-- Layers: `skill-inspect-google-drive`
 - Modules: `skill-module-drive-para`, `skill-module-local-gtd`
 - Artifacts: `DriveCensus`, `LocalGtdResult`, `WorkspaceCensus`
+
+`skill-inspect-google-drive` lives in the Second Brain repository.
 
 ### Item E. Tooling
 
@@ -89,7 +89,7 @@ Task fill lives in `skill-sync-gitlab-mrs-to-notion` and `tasks.md`. Label mappi
 - Modules: `skill-module-inspect-gitlab-mrs`
 - Artifacts: `ArchitectureConflictReport`, `ArchitectureDocsUpdated`
 
-Inspect is read-only. Update writes the planning tree after an ask. A merged merge request that the owner asked to archive is handed to `skill-sync-gitlab-mrs-to-notion`. Task fill stays in that layer and `tasks.md`. These layers do not own Terraform DAG, security, test authoring, idempotency, or module-shape review.
+Inspect is read-only. Update writes the planning tree after an ask. A merged merge request that the owner asked to archive is handed to `skill-sync-gitlab-mrs-to-notion` in the Second Brain repository. Task fill stays in `skill-sync-gitlab-mrs-to-notion` and in `tasks.md` under `docs_root`. These layers do not own Terraform DAG, security, test authoring, idempotency, or module-shape review.
 
 ## Section 4. Shared kernel
 
@@ -98,7 +98,7 @@ Inspect is read-only. Update writes the planning tree after an ask. A merged mer
 | `modules/shared/write-gate.md` | A write needs an explicit ask in the current turn |
 | `modules/shared/notion-mcp.md` | Notion MCP bootstrap                              |
 
-Collection IDs live in `~/.grok/docs/second-brain/03-identifiers.md`.
+Collection IDs live in `03-identifiers.md` under `docs_root`.
 
 ## Section 5. After every run
 
@@ -111,4 +111,4 @@ Run The Algorithm in `docs/skill-system/README.md` Section 3 Item A before addin
 1. Question the requirement.
 2. Delete a step when that removes the need for a new skill.
 3. Edit the layer fill table or the module JSON map.
-4. Leave Second Brain unchanged unless a Notion entity itself changed.
+4. Leave the external context contract unchanged unless a Notion entity itself changed.

@@ -8,6 +8,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from context_docs.resolve import catalog_skill_sources
+
 from adapter_install.cursor_mdc import load_cursor_scenarios
 from adapter_install.cursor_mdc import render_cursor_mdc
 
@@ -444,6 +446,8 @@ def inspect_spec_drift(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "source-missing"
     if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
+    if _is_skills_directory_spec(spec):
+        return _inspect_skills_directory(grok_root, home)
     state = inspect_dest_drift(
         dest, source, spec.mode, scenario_id=spec.scenario_id
     )
@@ -456,12 +460,131 @@ def _is_applyable(state: str) -> bool:
     return state in (
         "ok",
         "missing",
+        "incomplete",
+        "collapsed-symlink",
         "wrong-symlink",
         "broken-symlink",
         "symlink-for-copy",
         "regular-same",
         "copy-differs",
     )
+
+
+def _is_skills_directory_spec(spec: AdapterSpec) -> bool:
+    """Return True for the per-skill link directory."""
+    return spec.source == "skills" and spec.dest == ".grok/skills"
+
+
+def _expected_skill_links(
+    grok_root: Path, home: Path
+) -> dict[str, Path] | str:
+    """Return link name to source path, or an error string."""
+    skills = grok_root / "skills"
+    links = {child.name: child.resolve() for child in skills.iterdir()}
+    catalog = home / ".grok" / "contexts.toml"
+    extra = catalog_skill_sources(catalog)
+    if isinstance(extra, str):
+        return extra
+    for name, source in extra.items():
+        previous = links.get(name)
+        if previous is not None and previous != source:
+            return f"skill name collision: {name}"
+        links[name] = source
+    return links
+
+
+def _symlink_matches(child: Path, source: Path) -> bool:
+    """Return True when child is a symlink to source."""
+    if not child.is_symlink():
+        return False
+    try:
+        return child.resolve() == source.resolve()
+    except OSError:
+        return False
+
+
+def _entry_matches(child: Path, source: Path) -> bool:
+    """Return True when a regular child has the same bytes as source."""
+    if child.is_symlink():
+        return False
+    if child.is_file() and source.is_file():
+        return _load_file_bytes(child) == _load_file_bytes(source)
+    if child.is_dir() and source.is_dir():
+        return is_directory_trees_identical(child, source)
+    return False
+
+
+def _inspect_skills_directory(grok_root: Path, home: Path) -> str:
+    """Return drift for .grok/skills as one symlink per skill."""
+    expected = _expected_skill_links(grok_root, home)
+    if isinstance(expected, str):
+        if expected.startswith("skill name collision:"):
+            return "skill-name-conflict"
+        if expected == "source-missing":
+            return "source-missing"
+        return "unexpected-type"
+    dest = home / ".grok" / "skills"
+    if dest.is_symlink():
+        return "collapsed-symlink"
+    if not dest.exists():
+        return "missing"
+    if not dest.is_dir():
+        return "unexpected-type"
+    present = {child.name for child in dest.iterdir()}
+    if present - expected.keys():
+        return "regular-differs"
+    needs_link = False
+    for name, source in expected.items():
+        child = dest / name
+        if name not in present:
+            needs_link = True
+            continue
+        if _symlink_matches(child, source):
+            continue
+        if child.is_symlink():
+            return "regular-differs"
+        if _entry_matches(child, source):
+            needs_link = True
+            continue
+        return "regular-differs"
+    if needs_link:
+        return "incomplete"
+    return "ok"
+
+
+def _apply_skills_directory(grok_root: Path, home: Path) -> str:
+    """Create one symlink per skill. Leave unexpected names in place."""
+    state = _inspect_skills_directory(grok_root, home)
+    if state == "ok":
+        return "skipped"
+    applyable = {
+        "missing",
+        "incomplete",
+        "collapsed-symlink",
+        "regular-same",
+    }
+    if state not in applyable:
+        return state
+    expected = _expected_skill_links(grok_root, home)
+    if isinstance(expected, str):
+        return state
+    dest = home / ".grok" / "skills"
+    if dest.is_symlink():
+        dest.unlink()
+    if not dest.exists():
+        dest.mkdir(parents=True)
+    if not dest.is_dir():
+        return "unexpected-type"
+    for name, source in expected.items():
+        child = dest / name
+        if _symlink_matches(child, source):
+            continue
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            _clear_replaceable_tree(child)
+        child.symlink_to(source, target_is_directory=source.is_dir())
+    return "applied"
 
 
 def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
@@ -475,6 +598,8 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         return "source-missing"
     if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
+    if _is_skills_directory_spec(spec):
+        return _apply_skills_directory(grok_root, home)
     state = inspect_dest_drift(
         dest, source, spec.mode, scenario_id=spec.scenario_id
     )
@@ -557,7 +682,7 @@ def reconcile_all_specs(grok_root: Path, home: Path) -> int:
         if status == "source-missing" or status == "dest-escapes":
             blocked.append((spec.dest, status))
             continue
-        if status == "unexpected-type":
+        if status == "unexpected-type" or status == "skill-name-conflict":
             blocked.append((spec.dest, status))
     if blocked:
         for dest, status in blocked:

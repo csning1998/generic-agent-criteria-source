@@ -151,6 +151,52 @@ def resolve_catalog_socket(
     }
 
 
+def catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
+    """Return declared skill name to source path, or an error string."""
+    if not config_path.is_file():
+        return {}
+    try:
+        loaded = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return "config file is absent"
+    if not isinstance(loaded, dict):
+        return {}
+    context = loaded.get("context")
+    if not isinstance(context, dict):
+        return {}
+    sources: dict[str, Path] = {}
+    for pack_id, section in context.items():
+        if not isinstance(section, dict):
+            continue
+        listed = section.get("skills")
+        if not listed:
+            continue
+        if not isinstance(listed, list):
+            return f"context.{pack_id}.skills is absent"
+        raw_path = section.get("skills_path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return f"context.{pack_id}.skills_path is absent"
+        root = Path(raw_path).expanduser().resolve()
+        if not root.is_dir():
+            return "skills_path directory is absent"
+        for name in listed:
+            if (
+                not isinstance(name, str)
+                or not name.strip()
+                or name in {".", ".."}
+                or "/" in name
+            ):
+                return f"context.{pack_id}.skills is absent"
+            source = (root / name).resolve()
+            if not source.exists():
+                return "source-missing"
+            previous = sources.get(name)
+            if previous is not None and previous != source:
+                return f"skill name collision: {name}"
+            sources[name] = source
+    return sources
+
+
 def _arguments(args: list[str]) -> tuple[Path, str, str] | str:
     """Return config path, mode, and id, or a usage error."""
     config = Path.home() / ".grok" / "contexts.toml"

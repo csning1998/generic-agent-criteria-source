@@ -172,18 +172,50 @@ def test_reconcile_spec_with_divergent_directory_aborts_without_overwrite(
     assert marker.read_text(encoding="utf-8") == "owner edit\n"
 
 
-def test_identical_directory_becomes_symlink(tmp_path: Path) -> None:
-    """A same-bytes directory dest is replaced by a symlink."""
+def test_identical_skills_directory_becomes_per_skill_symlinks(
+    tmp_path: Path,
+) -> None:
+    """A same-bytes skills directory becomes one symlink per child."""
     home = tmp_path / "home"
     spec = next(s for s in SPECS if s.dest == ".grok/skills")
     dest = resolve_dest(home, spec)
     source = resolve_source(_repo_root(), spec)
     dest.parent.mkdir(parents=True)
     shutil.copytree(source, dest)
-    assert inspect_spec_drift(_repo_root(), home, spec) == "regular-same"
+    assert inspect_spec_drift(_repo_root(), home, spec) == "incomplete"
     assert reconcile_spec(_repo_root(), home, spec) == "applied"
-    assert dest.is_symlink()
-    assert dest.resolve() == source.resolve()
+    assert dest.is_dir()
+    assert not dest.is_symlink()
+    for child in source.iterdir():
+        link = dest / child.name
+        assert link.is_symlink()
+        assert link.resolve() == child.resolve()
+
+
+def test_catalog_skill_links_beside_repo_skills(tmp_path: Path) -> None:
+    """A catalog skills list adds one symlink and keeps repo skill links."""
+    home = tmp_path / "home"
+    pack_skill = tmp_path / "pack" / "skill-sample"
+    pack_skill.mkdir(parents=True)
+    (pack_skill / "SKILL.md").write_text("sample\n", encoding="utf-8")
+    catalog = home / ".grok" / "contexts.toml"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(
+        "[context.sample]\n"
+        f'skills_path = "{pack_skill.parent}"\n'
+        'skills = ["skill-sample"]\n',
+        encoding="utf-8",
+    )
+    spec = next(s for s in SPECS if s.dest == ".grok/skills")
+    assert reconcile_spec(_repo_root(), home, spec) == "applied"
+    external = home / ".grok" / "skills" / "skill-sample"
+    repo_skill = home / ".grok" / "skills" / "skill-yt-dlp"
+    assert external.is_symlink()
+    assert external.resolve() == pack_skill.resolve()
+    assert repo_skill.is_symlink()
+    assert repo_skill.resolve() == (
+        _repo_root() / "skills" / "skill-yt-dlp"
+    ).resolve()
 
 
 def test_default_command_is_check(tmp_path: Path) -> None:

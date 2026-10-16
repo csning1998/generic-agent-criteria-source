@@ -103,6 +103,21 @@ def test_resolve_context_docs_root_when_one_file_absent_returns_ok_false(
     assert result["error"] == "required file is absent: beta.md"
 
 
+def test_resolve_context_docs_root_with_empty_required_returns_ok_true(
+    tmp_path: Path,
+) -> None:
+    """An empty required list resolves successfully without anchor files."""
+    docs = tmp_path / "contract"
+    docs.mkdir()
+    config = tmp_path / "contexts.toml"
+    _write_section(config, "sample", str(docs), ())
+    result = resolve_context_docs_root(config, "sample")
+    assert result["ok"] is True
+    assert result["context_id"] == "sample"
+    assert result["error"] is None
+    assert result["docs_root"] == str(docs.resolve())
+
+
 def test_main_with_missing_config_exits_1_and_prints_ok_false(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

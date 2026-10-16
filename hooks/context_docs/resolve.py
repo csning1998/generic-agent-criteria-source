@@ -44,7 +44,7 @@ def _extract_required_names(
 ) -> tuple[str, ...] | str:
     """Return required file names, or an error string."""
     raw = section.get("required")
-    if not isinstance(raw, list) or not raw:
+    if not isinstance(raw, list):
         return f"context.{context_id}.required is absent"
     names: list[str] = []
     for item in raw:

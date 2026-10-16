@@ -1,0 +1,18 @@
+[context.second-brain]
+docs_root = "/home/csning1998/GitLab/csning1998-lab/personal/second-brain/documentation/agent-contract"
+required = [
+    "00-operating-contract.md",
+    "README.md",
+    "02-master-catalog.md",
+    "01-locate.md",
+    "03-identifiers.md",
+]
+skills_path = "/home/csning1998/GitLab/csning1998-lab/personal/second-brain/skills"
+skills = [
+    "skill-inspect-second-brain",
+    "skill-file-notion-resources",
+    "skill-inspect-notion-tasks",
+    "skill-sync-gitlab-mrs-to-notion",
+    "skill-transcribe-youtube-video-to-notion-resources",
+    "skill-inspect-google-drive",
+]

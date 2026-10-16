@@ -1,7 +1,7 @@
 [project]
 name = "generic-agent-criteria-source"
 version = "0.1.0"
-description = "Owner Grok skills, hooks, and Second Brain documentation."
+description = "Grok skills, hooks, and harness criteria."
 readme = "README-Repository.md"
 requires-python = ">=3.11"
 

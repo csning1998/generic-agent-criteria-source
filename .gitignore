@@ -33,15 +33,13 @@
 !/hooks/**
 hooks/state
 
-# User Second Brain documentation and markdown linters.
+# Markdown linters, coding standards, and the skill-system contract.
 !/docs/
 /docs/*
 !/docs/.markdownlint.json
 !/docs/.mdlrc
 !/docs/coding-standards/
 !/docs/coding-standards/**
-!/docs/second-brain/
-!/docs/second-brain/**
 !/docs/skill-system/
 !/docs/skill-system/**
 
@@ -52,6 +50,12 @@ hooks/state
 # Tracked template only. Live ~/.grok/config.toml is rewritten by the TUI
 # (reasoning effort, theme, privacy ack) and stays covered by /*.
 !/config.example.toml
+!/config/
+!/config/contexts.example.toml
+
+# Local Python lint, pytest, and SonarQube scan.
+!/pytest.sh
+!/merge-request.md
 
 # Personal workstation SELinux playbooks. Not consumed by Grok at runtime.
 !/ansible/

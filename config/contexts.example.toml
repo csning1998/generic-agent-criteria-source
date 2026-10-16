@@ -1,0 +1,8 @@
+# Blank catalog template. The filled catalog is config/contexts.toml.
+# One context table declares one external pack.
+
+[context.example]
+docs_root = ""
+required = []
+skills_path = ""
+skills = []

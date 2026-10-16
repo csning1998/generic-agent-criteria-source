@@ -233,6 +233,9 @@ graph LR
 | `hooks/criteria/4_L2-trigger/golang.md`           | `~/.gemini/lang_go.md`                 | symlink    |
 | `rules`                                           | `~/.grok/rules`                        | symlink    |
 | `skills`                                          | `~/.grok/skills`                       | symlink    |
+| `config/contexts.toml`                            | `~/.grok/contexts.toml`                | symlink    |
+| `config/contexts.toml`                            | `~/.claude/contexts.toml`              | symlink    |
+| `config/contexts.toml`                            | `~/.gemini/contexts.toml`              | symlink    |
 | `hooks/criteria/2_context/scenarios/languages.md` | `~/.cursor/rules/lang-<id>.mdc`        | cursor-mdc |
 
 Cursor `.mdc` files render dynamically from each record declared in `languages.md`. File copies utilize atomic replacement via temporary files to eliminate incomplete read windows.

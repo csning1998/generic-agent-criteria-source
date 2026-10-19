@@ -9,7 +9,6 @@ locals {
 
 locals {
   _state_base_parent_group_governance = "https://gitlab.com/api/v4/projects/86417732/terraform/state"
-  _state_auth                         = module.contexts_local_credential.state_auth_gitlab_saas
 }
 
 ephemeral "vault_kv_secret_v2" "state_backend" {
@@ -24,7 +23,7 @@ ephemeral "vault_kv_secret_v2" "github_publication" {
   name     = "parent-group-governance/github/publication"
 }
 
-ephemeral "vault_kv_secret_v2" "anthropic_admin_key" {
+ephemeral "vault_kv_secret_v2" "anthropic_console" {
   provider = vault.bastion
   mount    = "secret"
   name     = "parent-group-governance/ai-provider-console/anthropic"
@@ -32,15 +31,21 @@ ephemeral "vault_kv_secret_v2" "anthropic_admin_key" {
 
 data "terraform_remote_state" "group_federation_anthropic" {
   backend = "http"
-  config  = merge(local._state_auth, { address = "${local._state_base_parent_group_governance}/group-federation-anthropic" })
+  config = {
+    address = "${local._state_base_parent_group_governance}/group-federation-anthropic"
+  }
 }
 
 data "terraform_remote_state" "group_federation_gcp" {
   backend = "http"
-  config  = merge(local._state_auth, { address = "${local._state_base_parent_group_governance}/group-federation-gcp" })
+  config = {
+    address = "${local._state_base_parent_group_governance}/group-federation-gcp"
+  }
 }
 
 data "terraform_remote_state" "group_federation_azure" {
   backend = "http"
-  config  = merge(local._state_auth, { address = "${local._state_base_parent_group_governance}/group-federation-azure" })
+  config = {
+    address = "${local._state_base_parent_group_governance}/group-federation-azure"
+  }
 }

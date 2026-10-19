@@ -73,4 +73,5 @@ hooks/state
 
 __pycache__/
 *.egg-info/
-terraform/layers/meta-gitlab-project/tls/bastion-ca.pem
+terraform/layers/administration-gitlab-project/tls/bastion-ca.pem
+merge-request.md

@@ -1,9 +1,4 @@
 
-module "contexts_local_credential" {
-  source  = "gitlab.com/csning1998-lab/contexts-local-credential/gitlab"
-  version = "0.3.1"
-}
-
 data "gitlab_group" "personal" {
   full_path = "csning1998-lab/platform-engineering-lab"
 }
@@ -38,9 +33,8 @@ resource "gitlab_branch_protection" "main" {
 }
 
 module "workload_identity_federation" {
-  source    = "gitlab.com/csning1998-lab/provisioner-workload-identity-federation/gitlab"
-  version   = "0.3.1"
-  providers = { vault = vault.bastion }
+  source  = "gitlab.com/csning1998-lab/provisioner-workload-identity-federation/gitlab"
+  version = "0.4.0"
 
   gitlab_project = {
     id   = gitlab_project.this.id
@@ -74,7 +68,7 @@ module "workload_identity_federation" {
 
 module "code_reviewer" {
   source    = "gitlab.com/csning1998-lab/provisioner-code-reviewer/gitlab"
-  version   = "1.7.1"
+  version   = "~> 1.7.4"
   providers = { vault = vault.bastion }
 
   gitlab_project_id    = gitlab_project.this.id

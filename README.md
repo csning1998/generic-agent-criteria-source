@@ -236,6 +236,7 @@ graph LR
 | `config/contexts.toml`                            | `~/.grok/contexts.toml`                | symlink    |
 | `config/contexts.toml`                            | `~/.claude/contexts.toml`              | symlink    |
 | `config/contexts.toml`                            | `~/.gemini/contexts.toml`              | symlink    |
+| `skills`                                          | `~/.gemini/config/skills`              | symlink    |
 | `hooks/criteria/2_context/scenarios/languages.md` | `~/.cursor/rules/lang-<id>.mdc`        | cursor-mdc |
 
 Cursor `.mdc` files render dynamically from each record declared in `languages.md`. File copies utilize atomic replacement via temporary files to eliminate incomplete read windows.

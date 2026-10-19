@@ -209,6 +209,11 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
         dest=".gemini/contexts.toml",
         mode=MODE_SYMLINK,
     ),
+    AdapterSpec(
+        source="skills",
+        dest=".gemini/config/skills",
+        mode=MODE_SYMLINK,
+    ),
 )
 
 
@@ -463,7 +468,7 @@ def inspect_spec_drift(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
     if _is_skills_directory_spec(spec):
-        return _inspect_skills_directory(grok_root, home)
+        return _inspect_skills_directory(grok_root, home, dest_rel=spec.dest)
     state = inspect_dest_drift(
         dest, source, spec.mode, scenario_id=spec.scenario_id
     )
@@ -488,7 +493,10 @@ def _is_applyable(state: str) -> bool:
 
 def _is_skills_directory_spec(spec: AdapterSpec) -> bool:
     """Return True for the per-skill link directory."""
-    return spec.source == "skills" and spec.dest == ".grok/skills"
+    return spec.source == "skills" and spec.dest in (
+        ".grok/skills",
+        ".gemini/config/skills",
+    )
 
 
 def _resolve_skill_links(grok_root: Path, home: Path) -> dict[str, Path] | str:
@@ -528,8 +536,10 @@ def _is_identical_entry(child: Path, source: Path) -> bool:
     return False
 
 
-def _inspect_skills_directory(grok_root: Path, home: Path) -> str:
-    """Return drift for .grok/skills as one symlink per skill."""
+def _inspect_skills_directory(
+    grok_root: Path, home: Path, dest_rel: str = ".grok/skills"
+) -> str:
+    """Return drift for a skills directory as one symlink per skill."""
     expected = _resolve_skill_links(grok_root, home)
     if isinstance(expected, str):
         if expected.startswith("skill name collision:"):
@@ -537,7 +547,7 @@ def _inspect_skills_directory(grok_root: Path, home: Path) -> str:
         if expected == "source-missing":
             return "source-missing"
         return "unexpected-type"
-    dest = home / ".grok" / "skills"
+    dest = home.joinpath(*Path(dest_rel).parts)
     if dest.is_symlink():
         return "collapsed-symlink"
     if not dest.exists():
@@ -545,7 +555,7 @@ def _inspect_skills_directory(grok_root: Path, home: Path) -> str:
     if not dest.is_dir():
         return "unexpected-type"
     present = {child.name for child in dest.iterdir()}
-    if present - expected.keys():
+    if dest_rel == ".grok/skills" and (present - expected.keys()):
         return "regular-differs"
     needs_link = False
     for name, source in expected.items():
@@ -566,9 +576,11 @@ def _inspect_skills_directory(grok_root: Path, home: Path) -> str:
     return "ok"
 
 
-def _reconcile_skills_directory(grok_root: Path, home: Path) -> str:
+def _reconcile_skills_directory(
+    grok_root: Path, home: Path, dest_rel: str = ".grok/skills"
+) -> str:
     """Create one symlink per skill. Leave unexpected names in place."""
-    state = _inspect_skills_directory(grok_root, home)
+    state = _inspect_skills_directory(grok_root, home, dest_rel=dest_rel)
     if state == "ok":
         return "skipped"
     applyable = {
@@ -582,7 +594,7 @@ def _reconcile_skills_directory(grok_root: Path, home: Path) -> str:
     expected = _resolve_skill_links(grok_root, home)
     if isinstance(expected, str):
         return state
-    dest = home / ".grok" / "skills"
+    dest = home.joinpath(*Path(dest_rel).parts)
     if dest.is_symlink():
         dest.unlink()
     if not dest.exists():
@@ -613,7 +625,7 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
     if _is_skills_directory_spec(spec):
-        return _reconcile_skills_directory(grok_root, home)
+        return _reconcile_skills_directory(grok_root, home, dest_rel=spec.dest)
     state = inspect_dest_drift(
         dest, source, spec.mode, scenario_id=spec.scenario_id
     )

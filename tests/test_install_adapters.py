@@ -353,3 +353,60 @@ def test_reconcile_spec_dir_dest_under_copy_mode_is_left_untouched(
     assert result == "unexpected-type"
     assert dest.is_dir()
     assert (dest / "inner.txt").read_text() == "leftover\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "dest", "mode"),
+    [
+        ("hooks/adapters/skills", ".agents/skills", MODE_SYMLINK),
+        ("skills", ".grok/skills", MODE_SYMLINK),
+        ("skills", ".gemini/config/skills", MODE_SYMLINK),
+    ],
+)
+def test_skills_specs_matrix(source: str, dest: str, mode: str) -> None:
+    """Skills adapter specs register source, dest, and mode."""
+    specs = [spec for spec in SPECS if spec.dest == dest]
+    assert len(specs) == 1
+    assert specs[0].source == source
+    assert specs[0].mode == mode
+
+
+@pytest.mark.parametrize(
+    ("dest_rel", "expected_type"),
+    [
+        (".agents/skills", "dir_symlink"),
+        (".grok/skills", "dir_with_child_symlinks"),
+        (".gemini/config/skills", "dir_with_child_symlinks"),
+    ],
+)
+def test_skills_reconciled_matrix(
+    tmp_path: Path, dest_rel: str, expected_type: str
+) -> None:
+    """Harness skills destinations materialize according to target type."""
+    home = tmp_path / "home"
+    home.mkdir()
+    assert reconcile_all_specs(_repo_root(), home) == 0
+    target = home / dest_rel
+    if expected_type == "dir_symlink":
+        assert target.is_symlink()
+        assert target.is_dir()
+    elif expected_type == "dir_with_child_symlinks":
+        assert target.is_dir()
+        assert not target.is_symlink()
+        assert any(child.is_symlink() for child in target.iterdir())
+
+
+def test_reconcile_skills_directory_preserves_existing_foreign_skills(
+    tmp_path: Path,
+) -> None:
+    """Foreign skills in .gemini/config/skills are preserved."""
+    home = tmp_path / "home"
+    spec = next(s for s in SPECS if s.dest == ".gemini/config/skills")
+    dest = resolve_dest(home, spec)
+    dest.mkdir(parents=True)
+    existing_skill = dest / "existing-custom-skill"
+    existing_skill.mkdir()
+    (existing_skill / "SKILL.md").write_text("custom\n", encoding="utf-8")
+    assert reconcile_spec(_repo_root(), home, spec) == "applied"
+    assert (dest / "existing-custom-skill" / "SKILL.md").is_file()
+    assert (dest / "skill-yt-dlp").is_symlink()

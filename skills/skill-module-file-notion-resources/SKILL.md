@@ -42,8 +42,8 @@ Load `~/.grok/skills/modules/shared/notion-mcp.md`.
 1. Call `search_tool` then the Notion MCP tools named in `notion-mcp.md`.
 2. For `lookup`, query `data_source_url` for `lookup.property` equals `lookup.value`. Return matching page urls.
 3. For `create` or `update`, read `payload_path`. Walk every string value. If any string contains `{{`, `}}`, or `%{`, return `ok` false and the snippet. Do not write.
-4. Create pages with parent `{"type":"data_source_id","data_source_id":"<data_source_id>"}`. Write properties and content from the payload file.
-5. For `update`, call `notion__notion-update-page` `update_properties` then `replace_content` on `page_id`. Write properties and content from the payload file.
+4. Create pages with parent `{"type":"data_source_id","data_source_id":"<data_source_id>"}`. Write properties and content from the payload file. Ensure `title` and `rich_text` property values do not contain raw Markdown syntax strings (such as `[**...**](...)` or unparsed inline code backticks); convert them into valid Notion Rich Text arrays. Write the full string of `content` from `payload_path` to the page body without truncation. Verify the retention of terminal sections in the markdown body.
+5. For `update`, call `notion__notion-update-page` `update_properties` then `replace_content` on `page_id`. Write properties and the full `content` from the payload file without prompt-level truncation. Verify the presence of terminal sections in the updated page body.
 6. Return page urls.
 
 ## Output
@@ -65,6 +65,9 @@ Artifact `NotionWriteResult`.
 - [ ] Properties and content came from `payload_path`
 - [ ] Template tokens abort the write
 - [ ] yt-dlp and Buzz were not called
+- [ ] No raw Markdown link or bold syntax in `title` property values
+- [ ] No raw backticks in `rich_text` property values
+- [ ] Page body markdown matches `payload_path` `content` in full without truncation
 
 ## Backtrack Triggers
 

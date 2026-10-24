@@ -55,6 +55,7 @@ lines-after-imports = 2
 [tool.ruff.lint.per-file-ignores]
 "hooks/bin/engineering-principles.py" = ["E402"]
 "hooks/bin/install-adapters.py" = ["E402"]
+"hooks/adapters/cursor/skill-module-gate.py" = ["E402"]
 "tests/test_lexicon_consistency.py" = ["E501"]
 "**/*.json" = ["E501", "F821"]
 

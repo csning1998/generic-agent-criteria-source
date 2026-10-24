@@ -21,8 +21,8 @@ _HOOKS = _resolve_hooks_root()
 if str(_HOOKS) not in sys.path:
     sys.path.insert(0, str(_HOOKS))
 
-from engineering_principles.module_stateless import find_module_stateless_reason  # noqa: E402
-from engineering_principles.module_stateless import is_skill_module_path  # noqa: E402
+from engineering_principles.module_stateless import find_module_stateless_reason
+from engineering_principles.module_stateless import is_skill_module_path
 
 
 def _extract_path_and_text(payload: dict) -> tuple[str, str]:

@@ -14,6 +14,9 @@ from engineering_principles.dispatch import intercept_user_prompt
 from engineering_principles.evaluate import find_write_deny_reason
 from engineering_principles.evaluate import record_leave
 from engineering_principles.evaluate import record_read
+from engineering_principles.manifest import ManifestError
+from engineering_principles.manifest import find_governing_specifications
+from engineering_principles.manifest import load_planning_manifest
 from engineering_principles.payload import extract_command
 from engineering_principles.payload import load_old_text
 from engineering_principles.state import extract_session_id
@@ -421,6 +424,178 @@ def test_load_old_text_cap_and_extract_command_alias(workspace: Path) -> None:
     huge.write_bytes(b"x" * (OLD_TEXT_MAX_BYTES + 1))
     assert load_old_text({}, str(huge)) == ""
     assert "psql" in extract_command({"cmd": "ssh harbor psql -c 'select 1'"})
+
+
+_MANIFEST = """\
+version = 1
+adjudication = "decisions.md"
+
+[[specifications]]
+path = "architecture/example-platform.md"
+governs = ["lab/example-platform"]
+
+[[specifications]]
+path = "architecture/example-consumer.md"
+governs = ["lab/example-consumer"]
+"""
+
+
+@pytest.fixture
+def manifest_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a planning tree that declares its layout in a manifest."""
+    planning = tmp_path / "notes"
+    (planning / "architecture").mkdir(parents=True)
+    (planning / "decisions.md").write_text("adjudication\n", encoding="utf-8")
+    for name in ("example-platform", "example-consumer"):
+        (planning / "architecture" / f"{name}.md").write_text(
+            f"{name}\n", encoding="utf-8"
+        )
+    (planning / "planning.manifest.toml").write_text(
+        _MANIFEST, encoding="utf-8"
+    )
+    monkeypatch.setenv(
+        "ENGINEERING_PRINCIPLES_STATE_DIR", str(tmp_path / "state")
+    )
+    monkeypatch.setenv("GROK_SESSION_ID", "manifest-session")
+    monkeypatch.setenv("GROK_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.delenv("ENGINEERING_PRINCIPLES_HOOK", raising=False)
+    monkeypatch.delenv("GROK_HOOK_EVENT", raising=False)
+    return tmp_path
+
+
+def _manifest_layer(tmp_path: Path, repo: str) -> str:
+    return str(tmp_path / f"lab/{repo}/terraform/layers/example-layer/main.tf")
+
+
+def test_manifest_gate_requires_governing_specification(
+    manifest_workspace: Path,
+) -> None:
+    """A governed path needs the adjudication and its own specification."""
+    payload = _payload(manifest_workspace, session="manifest-session")
+    planning = manifest_workspace / "notes"
+    layer = _manifest_layer(manifest_workspace, "example-platform")
+    reason = find_write_deny_reason(payload, layer, "locals {}\n", "")
+    assert "Architecture gate" in (reason or "")
+    assert "architecture/example-platform.md" in (reason or "")
+    record_read(payload, str(planning / "decisions.md"))
+    record_read(payload, str(planning / "architecture/example-consumer.md"))
+    assert "Architecture gate" in (
+        find_write_deny_reason(payload, layer, "locals {}\n", "") or ""
+    )
+    record_read(payload, str(planning / "architecture/example-platform.md"))
+    assert find_write_deny_reason(payload, layer, "locals {}\n", "") is None
+
+
+def test_manifest_gate_matches_path_prefix_not_substring(
+    manifest_workspace: Path,
+) -> None:
+    """A sibling whose name extends a governed repo name is not governed."""
+    payload = _payload(manifest_workspace, session="manifest-session")
+    sibling = _manifest_layer(manifest_workspace, "example-platform-extra")
+    assert find_write_deny_reason(payload, sibling, "locals {}\n", "") is None
+
+
+def test_manifest_gate_exempts_undeclared_repository(
+    manifest_workspace: Path,
+) -> None:
+    """A repository without a specification is outside the gate."""
+    payload = _payload(manifest_workspace, session="manifest-session")
+    other = _manifest_layer(manifest_workspace, "example-unlisted")
+    assert find_write_deny_reason(payload, other, "locals {}\n", "") is None
+
+
+def test_manifest_gate_on_planning_tree(manifest_workspace: Path) -> None:
+    """Planning edits need the adjudication and any one specification."""
+    payload = _payload(manifest_workspace, session="manifest-session")
+    planning = manifest_workspace / "notes"
+    target = str(planning / "architecture/example-consumer.md")
+    assert "Architecture gate" in (
+        find_write_deny_reason(payload, target, "text\n", "") or ""
+    )
+    record_read(payload, str(planning / "decisions.md"))
+    record_read(payload, str(planning / "architecture/example-platform.md"))
+    assert find_write_deny_reason(payload, target, "text\n", "") is None
+
+
+def test_manifest_gate_covers_shell_write(manifest_workspace: Path) -> None:
+    """A shell write naming a governed repository needs the same reads."""
+    payload = _payload(manifest_workspace, session="manifest-session")
+    command = "sed -i s/a/b/ lab/example-consumer/terraform/layers/x/main.tf"
+    reason = find_write_deny_reason(payload, "", "", command)
+    assert "architecture/example-consumer.md" in (reason or "")
+
+
+def test_invalid_manifest_fails_closed(manifest_workspace: Path) -> None:
+    """A manifest that names a missing specification denies governed writes."""
+    payload = _payload(manifest_workspace, session="manifest-session")
+    planning = manifest_workspace / "notes"
+    (planning / "architecture/example-platform.md").unlink()
+    layer = _manifest_layer(manifest_workspace, "example-platform")
+    reason = find_write_deny_reason(payload, layer, "locals {}\n", "")
+    assert "planning manifest" in (reason or "")
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ('governed_dirs = "terraform"\n', "governed_dirs"),
+        ("governed_dirs = 5\n", "governed_dirs"),
+        ("governed_dirs = []\n", "governed_dirs"),
+        ('governed_dirs = ["terraform", ""]\n', "governed_dirs"),
+    ],
+)
+def test_manifest_rejects_malformed_governed_dirs(
+    manifest_workspace: Path, extra: str, message: str
+) -> None:
+    """A malformed governed_dirs value is a manifest error, not a crash."""
+    manifest = manifest_workspace / "notes" / "planning.manifest.toml"
+    body = manifest.read_text(encoding="utf-8")
+    head, rest = body.split("\n", 1)
+    manifest.write_text(f"{head}\n{extra}{rest}", encoding="utf-8")
+    with pytest.raises(ManifestError, match=message):
+        load_planning_manifest(manifest)
+    payload = _payload(manifest_workspace, session="manifest-session")
+    layer = _manifest_layer(manifest_workspace, "example-platform")
+    reason = find_write_deny_reason(payload, layer, "locals {}\n", "")
+    assert "planning manifest" in (reason or "")
+
+
+def test_manifest_rejects_specification_entry_that_is_not_a_table(
+    manifest_workspace: Path,
+) -> None:
+    """A scalar entry in specifications is a manifest error, not a crash."""
+    manifest = manifest_workspace / "notes" / "planning.manifest.toml"
+    manifest.write_text(
+        'version = 1\nadjudication = "decisions.md"\nspecifications = ["a"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestError, match=r"specifications\[0\]"):
+        load_planning_manifest(manifest)
+    payload = _payload(manifest_workspace, session="manifest-session")
+    layer = _manifest_layer(manifest_workspace, "example-platform")
+    reason = find_write_deny_reason(payload, layer, "locals {}\n", "")
+    assert "planning manifest" in (reason or "")
+
+
+def test_manifest_governed_dir_ignores_workspace_ancestors(
+    tmp_path: Path,
+) -> None:
+    """A governed name above the workspace does not govern the whole tree."""
+    workspace = tmp_path / "packer" / "workspace"
+    planning = workspace / "notes"
+    planning.mkdir(parents=True)
+    (planning / "decisions.md").write_text("adjudication\n", encoding="utf-8")
+    (planning / "spec.md").write_text("spec\n", encoding="utf-8")
+    (planning / "planning.manifest.toml").write_text(
+        'version = 1\nadjudication = "decisions.md"\n\n'
+        '[[specifications]]\npath = "spec.md"\ngoverns = ["lab/example"]\n',
+        encoding="utf-8",
+    )
+    manifest = load_planning_manifest(planning / "planning.manifest.toml")
+    docs = workspace / "lab/example/docs/README.md"
+    layer = workspace / "lab/example/terraform/main.tf"
+    assert find_governing_specifications(manifest, str(docs)) is None
+    assert find_governing_specifications(manifest, str(layer)) is not None
 
 
 def test_missing_session_does_not_leak_leave(

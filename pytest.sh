@@ -27,13 +27,15 @@ PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE="${coverage_rc}.data" uv run --with pyte
     --cov-config="$coverage_rc" --cov-report=xml:coverage.xml
 rm -f "${coverage_rc}.data"
 
-# The governance Vault Proxy reads the analysis token.
+# The credential-distributor Vault Proxy reads the analysis token.
 # The subshell keeps the Proxy environment off every other command.
 if ! command -v vault-proxy-env >/dev/null; then
     echo "vault-proxy-env is missing, run the first menu item of ./governance in parent-group-governance" >&2
     exit 1
 fi
-sonar_token=$(source <(vault-proxy-env governance) && vault kv get -mount=secret -field="${sonar_token_field}" "${sonar_token_path}")
+proxy_env=$(vault-proxy-env credential-distributor)
+sonar_token=$(eval "${proxy_env}" && vault kv get -mount=secret -field="${sonar_token_field}" "${sonar_token_path}")
+unset proxy_env
 
 # The scanner mounts only the analyzed trees read-only, since the Python indexer walks the whole base directory.
 # The root .gitignore drives the SCM exclusion.

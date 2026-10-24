@@ -4,7 +4,7 @@ This file is the complete form of Section 10 in `ENGINEERING_PRINCIPLES.md`. The
 
 The PreToolUse hook is the only hook event that can deny a tool call. The Stop hook can block the agent from ending a turn. The SessionStart hook creates session state and injects no file. The UserPromptSubmit hook records owner leave phrases and injects no file. The PostToolUse hook on a read records the opened path. The PostToolUse hook on a skill-module write records the path and scans the file on disk.
 
-The PreToolUse hook inspects the tool name, the target path, and the text about to be written. The PreToolUse hook does not classify work from the wording of the owner's task. Two different phrasings of the same mutation receive the same decision.
+The PreToolUse hook inspects the tool name, the target path, and the text about to be written. The PreToolUse hook does not classify work from the wording of the task from the owner. Two different phrasings of the same mutation receive the same decision.
 
 ## Section 1. Prerequisite Reading
 
@@ -13,6 +13,19 @@ The PreToolUse hook inspects the tool name, the target path, and the text about 
 2. **Post-read Checklist**. After those reads, and before the first mutation, the executing Agent MUST write four checks. The four checks are the planned move, the planned name, the DAG direction, and whether the mutation sits inside the current task. Completing the four checks only in working memory does not satisfy Section 1 item 2. The PreToolUse hook does not read the written checklist. The PreToolUse hook only records that the files were opened.
 
 3. **Reading Cannot Be Substituted**. A search-result fragment does not count as a read. Context from an earlier session does not count as a read. Inferring content from a file name does not count as a read. The PreToolUse hook counts a path only after the read-file tool opened that path in the current session.
+
+4. **Planning Manifest**. A planning tree MAY declare its layout in a file named `planning.manifest.toml` at the root of the planning tree. The PreToolUse hook searches the workspace root and each ancestor, then the working directory and each ancestor, for a child directory holding `planning.manifest.toml`. A manifest found by that search replaces the file-name convention of Section 1 item 1. The manifest MUST set `version = 1`. The manifest MUST name the adjudication record in `adjudication`, relative to the planning tree. Each `[[specifications]]` entry MUST name one specification file in `path`, relative to the planning tree. Each `[[specifications]]` entry MUST list the governed repository paths in `governs`, relative to the parent directory of the planning tree. Every named file MUST exist. A named path MUST NOT be absolute and MUST NOT contain `..`. The optional `governed_dirs` lists the directory names that mark a governed path, and the default is `terraform`, `ansible`, and `packer`.
+
+    A mutation under a governed directory of a governed repository path requires reads of the adjudication record and of every specification whose `governs` contains the path. The PreToolUse hook matches `governs` as a path prefix, hence `lab/example` does not govern `lab/example-extra`. A mutation inside the planning tree requires reads of the adjudication record and of at least one specification. A path outside every `governs` entry is outside this gate. A malformed manifest, a manifest naming a missing file, and two manifests under one ancestor each make the PreToolUse hook deny every mutation under a governed directory until the manifest is fixed.
+
+    ```toml
+    version = 1
+    adjudication = "decisions.md"
+
+    [[specifications]]
+    path = "architecture/example-service.md"
+    governs = ["lab/example-service"]
+    ```
 
 ## Section 2. Generic Module Authorization
 
@@ -35,7 +48,7 @@ The PreToolUse hook inspects the tool name, the target path, and the text about 
 
 A pre-existing fragment that already matched a forbidden pattern does not deny a write that only edits other lines. An image tag does not deny a write. A lock-file edit does not deny a write.
 
-1. **Behavior After Blocking**. After a deny, the executing Agent MUST print the rule identifier and the line numbers from the deny reason. The executing Agent MUST NOT rewrite the payload so that the pattern no longer matches while the same action remains. A rewrite of that kind is itself a violation.
+1. **Behavior After Blocking**. After a deny, the executing Agent MUST print the rule identifier and the line numbers from the deny reason. The executing Agent MUST NOT rewrite the payload to make the pattern stop matching while the same action remains. A rewrite of that kind is itself a violation.
 
 2. **Exceptions**. Owner intent for a time-bounded exception MUST be a named entry in `planning/decisions.md`. The named entry MUST state the scope and the end date. A comment in code MUST NOT declare an exception. The PreToolUse hook does not read `planning/decisions.md` for exceptions. The named entry therefore does not disable Item A. A local experiment that must pass Item A requires `ENGINEERING_PRINCIPLES_HOOK=0`.
 
@@ -43,7 +56,7 @@ A pre-existing fragment that already matched a forbidden pattern does not deny a
 
 1. **PreToolUse**. When the write target path contains `skill-module-`, or a shell redirect, `tee`, `cp`, `mv`, or `sed -i` destination contains `skill-module-`, the PreToolUse hook scans the composed file text, any heredoc body, and `echo` / `printf` / `sed` payloads. The rest of the shell command is not file content. A `search_replace` compose is the current file with `old_string` replaced by `new_string`. Disk reads stay under `workspaceRoot` or `~/.grok`.
 2. **PostToolUse**. After a successful mutation of a skill-module write target, the PostToolUse hook records that path and scans the file on disk.
-3. **Stop**. When the turn ends, the Stop hook reads each recorded skill-module path. A remaining denied token blocks the stop. The executing Agent MUST rewrite the file so that only placeholders remain.
+3. **Stop**. When the turn ends, the Stop hook reads each recorded skill-module path. A remaining denied token blocks the stop. The executing Agent MUST rewrite the file until only placeholders remain.
 4. **Denied Tokens**. The hook denies a collection UUID, an absolute `/home/` or `$HOME/` owner path, the owner login, and the Failure Managements collection prefix `316919d4`. Placeholder tokens inside `<...>` are stripped before that identifier scan. The hook then parses JSON objects in the file with `json.JSONDecoder`. A mapping table key (`allowlist`, `type_from_conv`, `repo_area`, and the sibling keys) is denied when any string in that value is not a placeholder. An empty `{}` or `[]`, or a value whose strings are only placeholders, is allowed.
 5. **Required Correction**. After a deny or a Stop block, the executing Agent MUST move those values into layer JSON. The module file MUST keep placeholders only.
 

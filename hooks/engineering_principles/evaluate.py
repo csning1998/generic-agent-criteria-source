@@ -24,6 +24,12 @@ from engineering_principles.config import READ_ONLY_CMD_RE
 from engineering_principles.config import TAUTOLOGICAL_PROVIDER_RE
 from engineering_principles.config import VAULT_CREDENTIAL_MODULE_RE
 from engineering_principles.config import WRITE_CMD_RE
+from engineering_principles.manifest import ManifestError
+from engineering_principles.manifest import PlanningManifest
+from engineering_principles.manifest import find_governing_specifications
+from engineering_principles.manifest import find_planning_manifest
+from engineering_principles.manifest import find_specifications_in_command
+from engineering_principles.manifest import load_planning_manifest
 from engineering_principles.paths import find_planning_root
 from engineering_principles.paths import is_ansible_path
 from engineering_principles.paths import is_consumer_layer
@@ -130,6 +136,88 @@ def render_cite(
     return (
         f"99-hook-contract.md {rule}{location}. {message} "
         "Do not rewrite the content to evade this rule."
+    )
+
+
+def load_manifest_status(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the planning manifest or its error, or None without one."""
+    starts = [resolve_workspace_root(payload)]
+    if payload.get("cwd"):
+        starts.append(Path(str(payload["cwd"])))
+    for start in starts:
+        try:
+            found = find_planning_manifest(start)
+            if found is not None:
+                return {"manifest": load_planning_manifest(found)}
+        except ManifestError as error:
+            return {"manifest_error": str(error)}
+    return None
+
+
+def _resolve_read_set(state: dict[str, Any]) -> set[str]:
+    reads: set[str] = set()
+    for item in state.get("read_paths", []):
+        path = Path(str(item)).expanduser()
+        reads.add(str(path))
+        try:
+            reads.add(str(path.resolve()))
+        except OSError:
+            continue
+    return reads
+
+
+def _is_read(path: Path, reads: set[str]) -> bool:
+    try:
+        return str(path) in reads or str(path.resolve()) in reads
+    except OSError:
+        return str(path) in reads
+
+
+def find_missing_manifest_reason(
+    target: str,
+    status: dict[str, Any],
+    state: dict[str, Any],
+    is_command: bool,
+) -> str | None:
+    """Return a deny reason when manifest-required reads are missing."""
+    if "manifest_error" in status:
+        if not is_governed_path(target):
+            return None
+        return render_cite(
+            "Section 3 Item A.1",
+            "",
+            None,
+            "The planning manifest is invalid, so the architecture gate "
+            f"cannot resolve the required reads: {status['manifest_error']}. "
+            "Fix the manifest before mutating this tree.",
+        )
+    manifest: PlanningManifest = status["manifest"]
+    specs = (
+        find_specifications_in_command(manifest, target)
+        if is_command
+        else find_governing_specifications(manifest, target)
+    )
+    if specs is None:
+        return None
+    reads = _resolve_read_set(state)
+    missing: list[str] = []
+    if not _is_read(manifest.adjudication, reads):
+        missing.append(str(manifest.adjudication))
+    if specs:
+        missing += [str(s.path) for s in specs if not _is_read(s.path, reads)]
+    elif not any(_is_read(s.path, reads) for s in manifest.specifications):
+        shown = [str(s.path) for s in manifest.specifications[:4]]
+        missing.append("at least one of: " + ", ".join(shown))
+    if not missing:
+        return None
+    return render_cite(
+        "Section 3 Item A.1",
+        "",
+        None,
+        "Architecture gate: read these files with read_file before mutating "
+        "this covered tree: "
+        + "; ".join(missing)
+        + ". Then state move, name, DAG, and whether this edit is in scope.",
     )
 
 
@@ -245,7 +333,14 @@ def find_command_without_path_reason(
             )
     if READ_ONLY_CMD_RE.search(command):
         return None
-    if WRITE_CMD_RE.search(command) and is_governed_path(command):
+    if not WRITE_CMD_RE.search(command):
+        return None
+    manifest_status = load_manifest_status(payload)
+    if manifest_status is not None:
+        return find_missing_manifest_reason(
+            command, manifest_status, state, is_command=True
+        )
+    if is_governed_path(command):
         return find_missing_planning_reason(
             command, inspect_planning_status(payload, state)
         )
@@ -427,6 +522,11 @@ def find_write_deny_reason(
     if reason:
         return reason
 
+    manifest_status = load_manifest_status(payload)
+    if manifest_status is not None:
+        return find_missing_manifest_reason(
+            path, manifest_status, state, is_command=False
+        )
     if is_governed_path(path):
         return find_missing_planning_reason(
             path, inspect_planning_status(payload, state)

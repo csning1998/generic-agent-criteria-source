@@ -14,6 +14,9 @@ from engineering_principles.dispatch import intercept_user_prompt
 from engineering_principles.evaluate import find_write_deny_reason
 from engineering_principles.evaluate import record_leave
 from engineering_principles.evaluate import record_read
+from engineering_principles.manifest import ManifestError
+from engineering_principles.manifest import find_governing_specifications
+from engineering_principles.manifest import load_planning_manifest
 from engineering_principles.payload import extract_command
 from engineering_principles.payload import load_old_text
 from engineering_principles.state import extract_session_id
@@ -530,6 +533,69 @@ def test_invalid_manifest_fails_closed(manifest_workspace: Path) -> None:
     layer = _manifest_layer(manifest_workspace, "example-platform")
     reason = find_write_deny_reason(payload, layer, "locals {}\n", "")
     assert "planning manifest" in (reason or "")
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ('governed_dirs = "terraform"\n', "governed_dirs"),
+        ("governed_dirs = 5\n", "governed_dirs"),
+        ("governed_dirs = []\n", "governed_dirs"),
+        ('governed_dirs = ["terraform", ""]\n', "governed_dirs"),
+    ],
+)
+def test_manifest_rejects_malformed_governed_dirs(
+    manifest_workspace: Path, extra: str, message: str
+) -> None:
+    """A malformed governed_dirs value is a manifest error, not a crash."""
+    manifest = manifest_workspace / "notes" / "planning.manifest.toml"
+    body = manifest.read_text(encoding="utf-8")
+    head, rest = body.split("\n", 1)
+    manifest.write_text(f"{head}\n{extra}{rest}", encoding="utf-8")
+    with pytest.raises(ManifestError, match=message):
+        load_planning_manifest(manifest)
+    payload = _payload(manifest_workspace, session="manifest-session")
+    layer = _manifest_layer(manifest_workspace, "example-platform")
+    reason = find_write_deny_reason(payload, layer, "locals {}\n", "")
+    assert "planning manifest" in (reason or "")
+
+
+def test_manifest_rejects_specification_entry_that_is_not_a_table(
+    manifest_workspace: Path,
+) -> None:
+    """A scalar entry in specifications is a manifest error, not a crash."""
+    manifest = manifest_workspace / "notes" / "planning.manifest.toml"
+    manifest.write_text(
+        'version = 1\nadjudication = "decisions.md"\nspecifications = ["a"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestError, match=r"specifications\[0\]"):
+        load_planning_manifest(manifest)
+    payload = _payload(manifest_workspace, session="manifest-session")
+    layer = _manifest_layer(manifest_workspace, "example-platform")
+    reason = find_write_deny_reason(payload, layer, "locals {}\n", "")
+    assert "planning manifest" in (reason or "")
+
+
+def test_manifest_governed_dir_ignores_workspace_ancestors(
+    tmp_path: Path,
+) -> None:
+    """A governed name above the workspace does not govern the whole tree."""
+    workspace = tmp_path / "packer" / "workspace"
+    planning = workspace / "notes"
+    planning.mkdir(parents=True)
+    (planning / "decisions.md").write_text("adjudication\n", encoding="utf-8")
+    (planning / "spec.md").write_text("spec\n", encoding="utf-8")
+    (planning / "planning.manifest.toml").write_text(
+        'version = 1\nadjudication = "decisions.md"\n\n'
+        '[[specifications]]\npath = "spec.md"\ngoverns = ["lab/example"]\n',
+        encoding="utf-8",
+    )
+    manifest = load_planning_manifest(planning / "planning.manifest.toml")
+    docs = workspace / "lab/example/docs/README.md"
+    layer = workspace / "lab/example/terraform/main.tf"
+    assert find_governing_specifications(manifest, str(docs)) is None
+    assert find_governing_specifications(manifest, str(layer)) is not None
 
 
 def test_missing_session_does_not_leak_leave(

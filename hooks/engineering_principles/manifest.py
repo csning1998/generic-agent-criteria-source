@@ -78,13 +78,24 @@ def load_planning_manifest(file: Path) -> PlanningManifest:
     )
     if not adjudication.is_file():
         raise ManifestError(f"{file}: adjudication {adjudication} is missing")
-    governed_dirs = tuple(data.get("governed_dirs", DEFAULT_GOVERNED_DIRS))
+    raw_dirs = data.get("governed_dirs", list(DEFAULT_GOVERNED_DIRS))
+    if (
+        not isinstance(raw_dirs, list)
+        or not raw_dirs
+        or not all(isinstance(item, str) and item for item in raw_dirs)
+    ):
+        raise ManifestError(
+            f"{file}: governed_dirs must be a non-empty list of names"
+        )
+    governed_dirs = tuple(raw_dirs)
     raw_specs = data.get("specifications")
     if not isinstance(raw_specs, list) or not raw_specs:
         raise ManifestError(f"{file}: specifications must be a non-empty list")
     specs: list[Specification] = []
     for index, raw in enumerate(raw_specs):
         field = f"specifications[{index}]"
+        if not isinstance(raw, dict):
+            raise ManifestError(f"{file}: {field} must be a table")
         path = root / _require_relative(raw.get("path"), f"{field}.path")
         if not path.is_file():
             raise ManifestError(f"{file}: {field}.path {path} is missing")
@@ -115,6 +126,14 @@ def _is_within(path: Path, base: Path) -> bool:
     return path == base or base in path.parents
 
 
+def _is_in_governed_dir(
+    path: Path, base: Path, governed_dirs: tuple[str, ...]
+) -> bool:
+    if not _is_within(path, base):
+        return False
+    return any(part in governed_dirs for part in path.relative_to(base).parts)
+
+
 def resolve_absolute(path: str, workspace: Path) -> Path:
     """Return an absolute path, joining relative input to the workspace."""
     candidate = Path(path).expanduser()
@@ -133,12 +152,13 @@ def find_governing_specifications(
     target = resolve_absolute(path, manifest.workspace)
     if _is_within(target, manifest.root.resolve()):
         return []
-    if not any(part in manifest.governed_dirs for part in target.parts):
-        return None
     hits = [
         spec
         for spec in manifest.specifications
-        if any(_is_within(target, base.resolve()) for base in spec.governs)
+        if any(
+            _is_in_governed_dir(target, base.resolve(), manifest.governed_dirs)
+            for base in spec.governs
+        )
     ]
     return hits or None
 

@@ -240,6 +240,9 @@ def _derive_cursor_specs(grok_root: Path) -> tuple[AdapterSpec, ...]:
 SPECS: tuple[AdapterSpec, ...] = _STATIC_SPECS + _derive_cursor_specs(
     resolve_grok_root()
 )
+SORTED_SPECS: tuple[AdapterSpec, ...] = tuple(
+    sorted(SPECS, key=lambda spec: spec.dest)
+)
 
 
 def _extract_spec_dests() -> frozenset[str]:
@@ -685,20 +688,25 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
 def inspect_all_specs(grok_root: Path, home: Path) -> int:
     """Print dest status. Return 1 when any dest is not ok."""
     failed = False
-    for spec in SPECS:
+    for spec in SORTED_SPECS:
         status = inspect_spec_drift(grok_root, home, spec)
         if status == "ok":
-            print(f"OK    {spec.dest}")
+            print(f"ALIGNED {spec.dest}")
             continue
         failed = True
-        print(f"DRIFT {spec.dest}: {status}")
+        print(f"DRIFT   {spec.dest}: {status}")
     return 1 if failed else 0
+
+
+def _render_outcomes(outcomes: dict[str, str]) -> list[str]:
+    """Render each outcome line in sorted dest order."""
+    return [f"{outcomes[dest]}{dest}" for dest in sorted(outcomes)]
 
 
 def reconcile_all_specs(grok_root: Path, home: Path) -> int:
     """Refuse mismatched dests, then materialize. Return 1 on abort."""
     blocked: list[tuple[str, str]] = []
-    for spec in SPECS:
+    for spec in SORTED_SPECS:
         status = inspect_spec_drift(grok_root, home, spec)
         if status == "ok":
             continue
@@ -712,21 +720,24 @@ def reconcile_all_specs(grok_root: Path, home: Path) -> int:
             blocked.append((spec.dest, status))
     if blocked:
         for dest, status in blocked:
-            print(f"ABORT {dest}: {status}")
+            print(f"ABORTED {dest}: {status}")
         return 1
-    failed = False
+    outcomes: dict[str, str] = {}
     for spec in SPECS:
         result = reconcile_spec(grok_root, home, spec)
         if result == "skipped":
-            print(f"SKIP  {spec.dest}")
+            outcomes[spec.dest] = "SKIPPED "
             continue
         if result == "applied":
-            print(f"APPLY {spec.dest}")
+            outcomes[spec.dest] = "APPLIED "
             continue
-        failed = True
-        print(f"ABORT {spec.dest}: {result}")
+        for line in _render_outcomes(outcomes):
+            print(line)
+        print(f"ABORTED {spec.dest}: {result}")
         return 1
-    return 1 if failed else 0
+    for line in _render_outcomes(outcomes):
+        print(line)
+    return 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

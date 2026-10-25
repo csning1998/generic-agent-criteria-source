@@ -1,11 +1,11 @@
 ---
-name: skill-apply-gitlab-mr-labels
+name: skill-layer-apply-gitlab-mr-labels
 effort: medium
 description: >
     Fill GitLab merge request label mapping JSON from group_labels and
     owner rules, then run the GitLab labels module. Use when the user
     asks to realign, apply, or rewrite GitLab MR labels from
-    group-governance, or runs /skill-apply-gitlab-mr-labels.
+    group-governance, or runs /skill-layer-apply-gitlab-mr-labels.
 metadata:
     short-description: "Fill and apply GitLab MR labels"
 ---
@@ -29,7 +29,7 @@ Read `~/.grok/skills/modules/shared/write-gate.md`.
 
 1. Extract allowlist keys from `group_labels` in the Terraform file. Do not invent a name that is absent from that map.
 2. Fill module JSON. Execution keys are `mode`, `group`, `include_subgroups`, `sleep_s`, `only_if_changed`, and `allow_clear`. Put every mapping table under `tables`. Mapping tables live only in this layer.
-3. Write `/tmp/skill-apply-gitlab-mr-labels/<run>/` with mode `0700` and `input.json` there.
+3. Write `/tmp/skill-layer-apply-gitlab-mr-labels/<run>/` with mode `0700` and `input.json` there.
 4. Default `mode` is `dry-run`. Set `mode` to `apply` only when the write gate allows it.
 5. Call `~/.grok/skills/skill-module-gitlab-mr-labels/SKILL.md` with that JSON.
 

@@ -10,7 +10,7 @@ when-to-use: MR review comments, triage review threads, mr-review
 
 # MR review
 
-Process aligns to `references/308_Merge_Request_Review_Handling.md`. This skill is the thin installable shell under `~/.agents/skills/mr-review/`. Delivery write detail for GitLab discussion fetch and apply remains in `skills/skill-review-gitlab-mr-comments/SKILL.md` when that tree is present. The verify gate and the reply or resolve authorization rules MUST stay consistent with that skill.
+Process aligns to `references/308_Merge_Request_Review_Handling.md`. This skill is the thin installable shell under `~/.agents/skills/mr-review/`. Delivery write detail for GitLab discussion fetch and apply remains in `skills/skill-layer-review-gitlab-mr-comments/SKILL.md` when that tree is present. The verify gate and the reply or resolve authorization rules MUST stay consistent with that skill.
 
 1. Fetch unresolved discussions for the named merge request. Limit the set only when the owner named discussion identifiers or file paths in this turn.
 2. Verify each claim against current repository content, a live command, or a test run. Classify each thread as `confirmed`, `partial`, or `refuted`. Name the evidence for every `confirmed` verdict and every `refuted` verdict.

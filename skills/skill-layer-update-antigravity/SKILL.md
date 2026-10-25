@@ -1,11 +1,11 @@
 ---
-name: skill-update-antigravity
+name: skill-layer-update-antigravity
 effort: low
 description: >
     Update Google Antigravity IDE and Antigravity 2.0 Agent Manager on Linux
     from official tarballs on antigravity.google/download. Use when the user
     asks to update Antigravity, upgrade Antigravity IDE, update Agent Manager,
-    refresh the Antigravity hub, or runs /skill-update-antigravity.
+    refresh the Antigravity hub, or runs /skill-layer-update-antigravity.
 metadata:
     short-description: "Update Antigravity IDE and Agent Manager"
 ---

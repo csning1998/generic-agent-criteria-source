@@ -201,7 +201,7 @@ def test_find_first_stateful_hit_checked_in_modules() -> None:
 def test_find_module_stateless_reason_non_module_path() -> None:
     """Layer files may hold workspace identifiers."""
     reason = find_module_stateless_reason(
-        "skills/skill-apply-gitlab-mr-labels/SKILL.md",
+        "skills/skill-layer-apply-gitlab-mr-labels/SKILL.md",
         _UUID,
     )
     assert reason is None

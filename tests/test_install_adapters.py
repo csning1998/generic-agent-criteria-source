@@ -215,13 +215,13 @@ def test_catalog_skill_links_beside_repo_skills(
     spec = next(s for s in SPECS if s.dest == ".grok/skills")
     assert reconcile_spec(_repo_root(), home, spec) == "applied"
     external = home / ".grok" / "skills" / "skill-sample"
-    repo_skill = home / ".grok" / "skills" / "skill-yt-dlp"
+    repo_skill = home / ".grok" / "skills" / "skill-layer-yt-dlp"
     assert external.is_symlink()
     assert external.resolve() == pack_skill.resolve()
     assert repo_skill.is_symlink()
     assert (
         repo_skill.resolve()
-        == (_repo_root() / "skills" / "skill-yt-dlp").resolve()
+        == (_repo_root() / "skills" / "skill-layer-yt-dlp").resolve()
     )
 
 
@@ -409,4 +409,58 @@ def test_reconcile_skills_directory_preserves_existing_foreign_skills(
     (existing_skill / "SKILL.md").write_text("custom\n", encoding="utf-8")
     assert reconcile_spec(_repo_root(), home, spec) == "applied"
     assert (dest / "existing-custom-skill" / "SKILL.md").is_file()
-    assert (dest / "skill-yt-dlp").is_symlink()
+    assert (dest / "skill-layer-yt-dlp").is_symlink()
+
+
+def test_inspect_all_specs_prints_dests_sorted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Check output lists every dest in sorted path order."""
+    inspect_all_specs(_repo_root(), tmp_path)
+    lines = capsys.readouterr().out.splitlines()
+    printed = [line.split()[1].rstrip(":") for line in lines]
+    assert printed == sorted(spec.dest for spec in SPECS)
+
+
+def test_inspect_all_specs_prints_aligned_label(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dest with no drift is labeled ALIGNED."""
+    home = tmp_path / "home"
+    home.mkdir()
+    assert reconcile_all_specs(_repo_root(), home) == 0
+    capsys.readouterr()
+    assert inspect_all_specs(_repo_root(), home) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert {line.split()[0] for line in lines} == {"ALIGNED"}
+
+
+def test_reconcile_all_specs_prints_sorted_past_tense_labels(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Apply output is sorted by dest and labels the completed outcome."""
+    home = tmp_path / "home"
+    home.mkdir()
+    assert reconcile_all_specs(_repo_root(), home) == 0
+    applied = capsys.readouterr().out.splitlines()
+    assert [line.split()[1] for line in applied] == sorted(
+        spec.dest for spec in SPECS
+    )
+    assert {line.split()[0] for line in applied} == {"APPLIED"}
+    assert reconcile_all_specs(_repo_root(), home) == 0
+    skipped = capsys.readouterr().out.splitlines()
+    assert {line.split()[0] for line in skipped} == {"SKIPPED"}
+
+
+def test_reconcile_all_specs_prints_aborted_label(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A blocked dest is reported with the past tense label."""
+    home = tmp_path / "home"
+    dest = home / ".agents" / "AGENTS.md"
+    dest.parent.mkdir(parents=True)
+    dest.write_text("owner edit\n", encoding="utf-8")
+    assert reconcile_all_specs(_repo_root(), home) == 1
+    assert (
+        "ABORTED .agents/AGENTS.md: regular-differs" in capsys.readouterr().out
+    )

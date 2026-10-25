@@ -3,7 +3,7 @@ name: skill-module-update-antigravity
 effort: low
 description: >
     Execute Antigravity probe, download, stop, and replace from JSON
-    a layer already filled. Use when skill-update-antigravity hands
+    a layer already filled. Use when skill-layer-update-antigravity hands
     off that JSON, or when the user runs /skill-module-update-antigravity.
 metadata:
     short-description: "Execute Antigravity replace from JSON"

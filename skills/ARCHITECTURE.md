@@ -22,10 +22,11 @@ If the Notion API changes, only `skill-module-file-notion-resources` changes. yt
 
 ## Section 2. Naming
 
-| Kind   | Prefix          | Role                                                 |
-| ------ | --------------- | ---------------------------------------------------- |
-| Layer  | `skill-`        | Fill JSON. Sequence modules. Own destination fields. |
-| Module | `skill-module-` | Stateless. Execute one tool. Return JSON.            |
+| Tier   | Kind   | Prefix          | Role                                                               |
+| ------ | ------ | --------------- | ------------------------------------------------------------------ |
+| Tier 1 | Meta   | `skill-meta-`   | Factory creator, MCP JSON protocol, sandbox Python compute engine. |
+| Tier 2 | Layer  | `skill-layer-`  | Fill JSON. Sequence modules. Own destination fields.               |
+| Tier 3 | Module | `skill-module-` | Stateless. Execute one tool. Return JSON.                          |
 
 Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.grok/roles/`. `low` maps to `exec-low`. `medium` maps to `exec-medium`. Do not spawn bare `general-purpose` for those two values.
 
@@ -33,7 +34,7 @@ Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.g
 
 ### Item A. Media ingest
 
-- Layers: `skill-yt-dlp`, `skill-buzz-transcribe`
+- Layers: `skill-layer-yt-dlp`, `skill-layer-buzz-transcribe`
 - Modules: `skill-module-yt-dlp`, `skill-module-buzz-transcribe`, `skill-module-media-tags`
 - Artifacts: `WatchMedia`, `TranscriptDone`, `MediaTags`
 
@@ -47,9 +48,9 @@ External layers that call these modules are catalog sockets.
 ### Item C. Delivery
 
 - Layers
-    - `skill-inspect-gitlab-mrs`
-    - `skill-apply-gitlab-mr-labels`
-    - `skill-review-gitlab-mr-comments`
+    - `skill-layer-inspect-gitlab-mrs`
+    - `skill-layer-apply-gitlab-mr-labels`
+    - `skill-layer-review-gitlab-mr-comments`
 - Modules
     - `skill-module-inspect-gitlab-mrs`
     - `skill-module-inspect-notion-tasks`
@@ -63,7 +64,7 @@ External layers that call these modules are catalog sockets.
     - `GitlabMrCommentTriageResult`
     - `GitlabMrDiscussionsResult`
 
-Task fill is catalog socket `task-fill`. The entity file sits under that pack `docs_root`. Label mapping tables live in `skill-apply-gitlab-mr-labels`. Verdict evidence and the reply/resolve gate live in `skill-review-gitlab-mr-comments`. `skill-review-gitlab-mr-comments` hands SoC commit batching to `skill-commit-soc`.
+Task fill is catalog socket `task-fill`. The entity file sits under that pack `docs_root`. Label mapping tables live in `skill-layer-apply-gitlab-mr-labels`. Verdict evidence and the reply/resolve gate live in `skill-layer-review-gitlab-mr-comments`. `skill-layer-review-gitlab-mr-comments` hands SoC commit batching to `skill-layer-commit-soc`.
 
 ### Item D. Workspace
 
@@ -74,19 +75,34 @@ An external census layer is a catalog socket.
 
 ### Item E. Tooling
 
-- Layers: `skill-update-antigravity`, `skill-commit-soc`
+- Layers: `skill-layer-update-antigravity`, `skill-layer-commit-soc`
 - Modules: `skill-module-update-antigravity`, `skill-module-git-commit`
 - Artifacts: `AntigravityResult`, `GitCommitResult`
 
-`skill-commit-soc` fills SoC commit batches. The module applies `git add` and `git commit` only when the layer sets `execute` true for generic-agent-criteria-source. The module never runs `git push`.
+`skill-layer-commit-soc` fills SoC commit batches. The module applies `git add` and `git commit` only when the layer sets `execute` true for generic-agent-criteria-source. The module never runs `git push`.
 
 ### Item F. Architecture documents
 
-- Layers: `skill-inspect-architecture-docs`, `skill-update-architecture-docs`
+- Layers: `skill-layer-inspect-architecture-docs`, `skill-layer-update-architecture-docs`
 - Modules: `skill-module-inspect-gitlab-mrs`
 - Artifacts: `ArchitectureConflictReport`, `ArchitectureDocsUpdated`
 
 Inspect is read-only. Update writes the planning tree after an ask. A merged merge request that the owner asked to archive calls catalog socket `task-fill`. Task fill stays on socket `task-fill` and in the entity file under that pack `docs_root`. These layers do not own Terraform DAG, security, test authoring, idempotency, or module-shape review.
+
+### Item G. Meta engine and foundation
+
+- Meta: `skill-meta-factory-creator`, `skill-meta-mcp-json`, `skill-meta-python-engine`
+- Role: Universal agent operation protocols, MCP JSON fault-tolerant serialization, and sandbox deterministic Python compute engine.
+
+### Item H. Intelligence and trend
+
+- Modules: `skill-module-authority-search`, `skill-module-delta-comparator`, `skill-module-trend-style-normalizer`
+- Role: Authoritative search recipes, baseline state diffing, and style and epistemic normalization.
+
+### Item I. Calendar and scheduling
+
+- Modules: `skill-module-google-calendar`
+- Artifacts: `GoogleCalendarResult`
 
 ## Section 4. Shared kernel
 

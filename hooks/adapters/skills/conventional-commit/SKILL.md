@@ -13,4 +13,4 @@ The commit header format MUST follow `type(scope): description`. Commit types MU
 
 Executing `git commit` or `git add` MUST NOT occur unless the owner explicitly requested execution in the current turn via an authorized phrase such as 「去執行」 or 「跑這個」. Executing `git push` is strictly prohibited.
 
-SoC batched commits on the Grok home tree MUST remain in `~/.grok/skills/skill-commit-soc/`. This skill MUST NOT replace that layer.
+SoC batched commits on the Grok home tree MUST remain in `~/.grok/skills/skill-layer-commit-soc/`. This skill MUST NOT replace that layer.

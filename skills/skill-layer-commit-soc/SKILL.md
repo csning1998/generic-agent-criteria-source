@@ -1,11 +1,11 @@
 ---
-name: skill-commit-soc
+name: skill-layer-commit-soc
 effort: medium
 description: >
     Fill batched git add and commit commands with Conventional Commit
     headers. Apply those commands only in the generic-agent-criteria-source
     tree. Elsewhere print the commands. Use when the owner asks to
-    commit in SoC batches, or runs /skill-commit-soc.
+    commit in SoC batches, or runs /skill-layer-commit-soc.
 metadata:
     short-description: "SoC git commits, grok-only apply"
 ---
@@ -35,7 +35,7 @@ Read `~/.grok/skills/modules/shared/write-gate.md`.
     2. `git rev-parse --show-toplevel` is `$HOME/.grok`, or `origin` contains `generic-agent-criteria-source`.
 5. Otherwise set `execute` to false.
 6. Set `allow_push` to false always.
-7. Write `/tmp/skill-commit-soc/<run>/input.json` with mode `0700`.
+7. Write `/tmp/skill-layer-commit-soc/<run>/input.json` with mode `0700`.
 8. Call `~/.grok/skills/skill-module-git-commit/SKILL.md`.
 
 Do not call `git push`. Do not ask the module to push.

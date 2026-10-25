@@ -1,11 +1,11 @@
 ---
-name: skill-yt-dlp
+name: skill-layer-yt-dlp
 effort: low
 description: >
     List YouTube videos with yt-dlp and download only the URLs the
     owner picked. Use when the user names a video or channel URL,
     asks to list new uploads, asks to download a picked video, or
-    runs /skill-yt-dlp. Default is list-only. Download requires an
+    runs /skill-layer-yt-dlp. Default is list-only. Download requires an
     explicit ask in the current turn.
 metadata:
     short-description: "List and download picked YouTube videos"
@@ -69,4 +69,4 @@ Artifact `WatchMedia` on download. Artifact `YtDlpResult` on list (same JSON as 
 
 ## Example
 
-`/skill-yt-dlp` plus a `/videos` URL lists twenty rows. `/skill-yt-dlp` plus 「下載第一支」 fills `mode` `download`.
+`/skill-layer-yt-dlp` plus a `/videos` URL lists twenty rows. `/skill-layer-yt-dlp` plus 「下載第一支」 fills `mode` `download`.

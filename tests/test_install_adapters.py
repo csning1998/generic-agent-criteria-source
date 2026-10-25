@@ -215,13 +215,13 @@ def test_catalog_skill_links_beside_repo_skills(
     spec = next(s for s in SPECS if s.dest == ".grok/skills")
     assert reconcile_spec(_repo_root(), home, spec) == "applied"
     external = home / ".grok" / "skills" / "skill-sample"
-    repo_skill = home / ".grok" / "skills" / "skill-yt-dlp"
+    repo_skill = home / ".grok" / "skills" / "skill-layer-yt-dlp"
     assert external.is_symlink()
     assert external.resolve() == pack_skill.resolve()
     assert repo_skill.is_symlink()
     assert (
         repo_skill.resolve()
-        == (_repo_root() / "skills" / "skill-yt-dlp").resolve()
+        == (_repo_root() / "skills" / "skill-layer-yt-dlp").resolve()
     )
 
 
@@ -409,4 +409,4 @@ def test_reconcile_skills_directory_preserves_existing_foreign_skills(
     (existing_skill / "SKILL.md").write_text("custom\n", encoding="utf-8")
     assert reconcile_spec(_repo_root(), home, spec) == "applied"
     assert (dest / "existing-custom-skill" / "SKILL.md").is_file()
-    assert (dest / "skill-yt-dlp").is_symlink()
+    assert (dest / "skill-layer-yt-dlp").is_symlink()

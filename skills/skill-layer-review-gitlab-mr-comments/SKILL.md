@@ -1,5 +1,5 @@
 ---
-name: skill-review-gitlab-mr-comments
+name: skill-layer-review-gitlab-mr-comments
 effort: medium
 description: >
     Fetch GitLab merge request review comments, verify each claim
@@ -7,14 +7,14 @@ description: >
     code, then reply to or resolve threads only under a separate
     explicit ask for each. Use when the owner asks to investigate,
     triage, or address merge request comments, or runs
-    /skill-review-gitlab-mr-comments.
+    /skill-layer-review-gitlab-mr-comments.
 metadata:
     short-description: "Verify MR review comments, fix, gate reply/resolve"
 ---
 
 # Review GitLab MR comments
 
-Layer for delivery write. This file owns the verify-then-fix decision and the reply/resolve gate. It does not own commit batching; hand a fix off to `skill-commit-soc` when the owner asks to commit.
+Layer for delivery write. This file owns the verify-then-fix decision and the reply/resolve gate. It does not own commit batching; hand a fix off to `skill-layer-commit-soc` when the owner asks to commit.
 
 ## When to Use
 

@@ -1,12 +1,12 @@
 ---
-name: skill-update-architecture-docs
+name: skill-layer-update-architecture-docs
 effort: medium
 description: >
     Write an adjudicated fact into a project planning tree after an
     architecture discussion or a merged change. Use when the owner
     asks to update architecture documents, absorb a decision, sync
     planning after a merge request, or runs
-    /skill-update-architecture-docs. Default is list-only. Writing
+    /skill-layer-update-architecture-docs. Default is list-only. Writing
     requires an explicit ask in the current turn. Notion Task fill
     stays on catalog socket task-fill.
 metadata:
@@ -29,13 +29,13 @@ The owner asked to update planning documents after a discussion or after a merge
 
 Read `~/.grok/skills/modules/shared/write-gate.md`.
 
-Default file names match `skill-inspect-architecture-docs`.
+Default file names match `skill-layer-inspect-architecture-docs`.
 
 ## Process
 
 1. If this turn has no update ask, keep read-only and stop.
 2. If `planning_root` is missing, ask for `planning_root` and stop.
-3. If there is no `ArchitectureConflictReport` and the owner did not state a decision in this turn, run `skill-inspect-architecture-docs` first. Stop on any `open` finding.
+3. If there is no `ArchitectureConflictReport` and the owner did not state a decision in this turn, run `skill-layer-inspect-architecture-docs` first. Stop on any `open` finding.
 4. Write the fact once into the adjudication file. Other planning files may cite that name or drop the stale sentence. Do not paste the same paragraph into every topic file.
 5. Edit only files under `planning_root`. Do not edit a repository `documentation/` tree, or any other verified-implementation directory, unless the owner said the implementation was already verified in this turn.
 6. When the owner asked to archive a merged GitLab merge request, call catalog socket `task-fill`. Do not fill Task properties in this layer.
@@ -66,7 +66,7 @@ Artifact `ArchitectureDocsUpdated`.
 
 ## Backtrack Triggers
 
-- An `open` finding remains: return to `skill-inspect-architecture-docs` and stop.
+- An `open` finding remains: return to `skill-layer-inspect-architecture-docs` and stop.
 - Owner asked to archive a discussion with no merge request: ask which write layer to call.
 - Sync layer reports no create: keep the local write result and report that Notion handoff.
 

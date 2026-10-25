@@ -10,7 +10,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "hooks"))
 sys.path.insert(0, str(_ROOT / "hooks/adapters/claude"))
 sys.path.insert(0, str(_ROOT / "skills/skill-module-gitlab-mr-labels/scripts"))
-sys.path.insert(0, str(_ROOT / "skills/skill-update-antigravity/scripts"))
+sys.path.insert(0, str(_ROOT / "skills/skill-layer-update-antigravity/scripts"))
 
 
 @pytest.fixture(autouse=True)

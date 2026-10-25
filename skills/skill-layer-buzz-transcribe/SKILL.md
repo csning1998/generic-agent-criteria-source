@@ -1,10 +1,10 @@
 ---
-name: skill-buzz-transcribe
+name: skill-layer-buzz-transcribe
 effort: medium
 description: >
     Transcribe local audio or video files with the Buzz Flatpak CLI
     and write a .txt beside each input. Use when the user asks to
-    transcribe, run Buzz CLI, or runs /skill-buzz-transcribe.
+    transcribe, run Buzz CLI, or runs /skill-layer-buzz-transcribe.
     Default is list-only. Transcription requires an explicit ask
     in the current turn.
 metadata:
@@ -17,11 +17,11 @@ Layer for media ingest transcription.
 
 ## When to Use
 
-The owner named local media, or `WatchMedia` just returned from `skill-yt-dlp`.
+The owner named local media, or `WatchMedia` just returned from `skill-layer-yt-dlp`.
 
 ## Input Requirements
 
-- Required for transcribe: `WatchMedia` from `skill-yt-dlp`, or a local path the owner named.
+- Required for transcribe: `WatchMedia` from `skill-layer-yt-dlp`, or a local path the owner named.
 - Optional: watch URL language field.
 
 Read `~/.grok/skills/modules/shared/write-gate.md`.

@@ -1,11 +1,11 @@
 ---
-name: skill-inspect-gitlab-mrs
+name: skill-layer-inspect-gitlab-mrs
 effort: low
 description: >
     Enumerate GitLab merge requests with glab and return a stable field
     contract (iid, title, web_url, merged_at, description). Use when the
     user asks to inspect, list, or pull GitLab MRs, or runs
-    /skill-inspect-gitlab-mrs. Read-only. The write layer is
+    /skill-layer-inspect-gitlab-mrs. Read-only. The write layer is
     catalog socket task-fill.
 metadata:
     short-description: "List GitLab MRs via glab"
@@ -55,4 +55,4 @@ Artifact `GitlabMrList` plus optional `summary_paragraph` on each record.
 
 ## Example
 
-`/skill-inspect-gitlab-mrs` plus a repo path lists merged MRs.
+`/skill-layer-inspect-gitlab-mrs` plus a repo path lists merged MRs.

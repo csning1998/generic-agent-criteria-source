@@ -1,13 +1,13 @@
 ---
-name: skill-inspect-architecture-docs
+name: skill-layer-inspect-architecture-docs
 effort: medium
 description: >
     Read a project planning tree, find mutually exclusive claims,
     and stop on open conflicts. Use when the owner asks to review
     architecture documents, resolve planning conflicts, audit
     decisions against topic files, or runs
-    /skill-inspect-architecture-docs. Read-only. The write layer is
-    /skill-update-architecture-docs. Not a Terraform, security, or
+    /skill-layer-inspect-architecture-docs. Read-only. The write layer is
+    /skill-layer-update-architecture-docs. Not a Terraform, security, or
     test-authoring skill.
 metadata:
     short-description: "Review planning docs for open conflicts"
@@ -40,7 +40,7 @@ Do not assume a host path. Do not assume a cloud or on-prem product.
 
 1. If `planning_root` is missing, ask for it and stop.
 2. List Markdown files in that directory. Use the defaults above. If none of those names exist, ask the owner to name the adjudication file and the topic files.
-3. When the owner named a GitLab group or `owner/repo`, fill `skill-module-inspect-gitlab-mrs` JSON. Keep `GitlabMrList`. When the owner named an `iid`, keep that record only. Take `summary_paragraph` with the rule in `skill-inspect-gitlab-mrs`.
+3. When the owner named a GitLab group or `owner/repo`, fill `skill-module-inspect-gitlab-mrs` JSON. Keep `GitlabMrList`. When the owner named an `iid`, keep that record only. Take `summary_paragraph` with the rule in `skill-layer-inspect-gitlab-mrs`.
 4. Read the adjudication file first. Treat it as the authority for any fact it already names.
 5. Extract normative claims from the overview, topic files, and work list. Compare each claim to the adjudication file and to the other topic files.
 6. Classify each finding. Use only these classes:

@@ -22,11 +22,11 @@ If the Notion API changes, only `skill-module-file-notion-resources` changes. yt
 
 ## Section 2. Naming
 
-| Tier   | Kind   | Prefix          | Role                                                      |
-| ------ | ------ | --------------- | --------------------------------------------------------- |
-| Tier 1 | Meta   | `skill-meta-`   | Router, orchestrator, factory creator, artifact exporter. |
-| Tier 2 | Layer  | `skill-layer-`  | Fill JSON. Sequence modules. Own destination fields.      |
-| Tier 3 | Module | `skill-module-` | Stateless. Execute one tool. Return JSON.                 |
+| Tier   | Kind   | Prefix          | Role                                                               |
+| ------ | ------ | --------------- | ------------------------------------------------------------------ |
+| Tier 1 | Meta   | `skill-meta-`   | Factory creator, MCP JSON protocol, sandbox Python compute engine. |
+| Tier 2 | Layer  | `skill-layer-`  | Fill JSON. Sequence modules. Own destination fields.               |
+| Tier 3 | Module | `skill-module-` | Stateless. Execute one tool. Return JSON.                          |
 
 Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.grok/roles/`. `low` maps to `exec-low`. `medium` maps to `exec-medium`. Do not spawn bare `general-purpose` for those two values.
 

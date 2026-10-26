@@ -77,7 +77,14 @@ def resolve_context_docs_root(
     names = _extract_required_names(section, context_id)
     if isinstance(names, str):
         return _derive_failure(context_id, names)
-    docs = Path(raw).expanduser().resolve()
+    docs_raw = Path(raw).expanduser()
+    if not docs_raw.is_absolute():
+        base = config_path.parent
+        if base.name == ".agents":
+            base = base.parent
+        docs = (base / docs_raw).resolve()
+    else:
+        docs = docs_raw.resolve()
     if not docs.is_dir():
         return _derive_failure(context_id, _MISSING_DIR)
     for name in names:
@@ -216,7 +223,13 @@ def resolve_catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
 
 
 def resolve_catalog_path(grok_root: Path) -> Path:
-    """Return the catalog file in the repository."""
+    """Return the catalog file in the repository or workspace."""
+    candidate_agents = Path.cwd() / ".agents" / "contexts.toml"
+    if candidate_agents.is_file():
+        return candidate_agents
+    candidate_cwd = Path.cwd() / "contexts.toml"
+    if candidate_cwd.is_file():
+        return candidate_cwd
     return grok_root / "config" / "contexts.toml"
 
 

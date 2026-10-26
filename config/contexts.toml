@@ -9,6 +9,7 @@ required = [
 ]
 skills_path = "/home/csning1998/GitLab/csning1998-lab/personal/second-brain/skills"
 skills = [
+    "skill-module-inspect-second-brain",
     "skill-layer-inspect-second-brain",
     "skill-layer-file-notion-resources",
     "skill-layer-inspect-notion-tasks",

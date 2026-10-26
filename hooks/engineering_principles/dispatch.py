@@ -9,8 +9,10 @@ from typing import Any
 
 from engineering_principles.config import MUTATING_TOOLS
 from engineering_principles.config import READ_TOOLS
+from engineering_principles.evaluate import find_drift_gate_reason
 from engineering_principles.evaluate import find_write_deny_reason
 from engineering_principles.evaluate import record_leave
+from engineering_principles.evaluate import record_mutation
 from engineering_principles.evaluate import record_read
 from engineering_principles.module_stateless import derive_composed_module_text
 from engineering_principles.module_stateless import emit_post_write_scan
@@ -76,6 +78,10 @@ def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
     if tool not in MUTATING_TOOLS:
         return allow()
 
+    drift_reason = find_drift_gate_reason(payload, path)
+    if drift_reason:
+        return deny(drift_reason)
+
     content = ""
     if isinstance(tool_input_data.get("content"), str):
         content = tool_input_data["content"]
@@ -119,6 +125,8 @@ def intercept_post_tool_use(payload: dict[str, Any]) -> int:
     if tool in READ_TOOLS and path:
         record_read(payload, path)
     if tool in MUTATING_TOOLS:
+        if path:
+            record_mutation(payload, path)
         for item in resolve_skill_module_paths(path, command_text, cwd, root):
             record_skill_module_write(payload, item)
             emit_post_write_scan(item, root)

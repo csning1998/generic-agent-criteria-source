@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
 
+from engineering_principles.config import ALLOW_FULL_OVERWRITE_RE
 from engineering_principles.config import ANSIBLE_IDEMPOTENT_RE
 from engineering_principles.config import ANSIBLE_SHELL_RE
 from engineering_principles.config import ENV_ALIAS_RE
@@ -41,6 +43,9 @@ from engineering_principles.paths import is_planning_gate_required
 from engineering_principles.paths import is_self_path
 from engineering_principles.paths import load_architecture_repo_tokens
 from engineering_principles.paths import normalize_posix
+from engineering_principles.payload import extract_latest_user_request
+from engineering_principles.payload import extract_tool_input
+from engineering_principles.payload import normalize_tool
 from engineering_principles.state import load_state
 from engineering_principles.state import persist_state
 from engineering_principles.state import resolve_workspace_root
@@ -55,6 +60,18 @@ def has_added_match(before: str, after: str, pattern: re.Pattern[str]) -> bool:
     return after_hits > before_hits
 
 
+def compute_file_sha256(path: Path) -> str:
+    """Return the SHA-256 digest of the on-disk file bytes."""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            while chunk := f.read(65536):
+                h.update(chunk)
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
 def record_read(payload: dict[str, Any], path: str) -> dict[str, Any]:
     """Record that the session opened a path with the read tool."""
     state = load_state(payload)
@@ -63,8 +80,37 @@ def record_read(payload: dict[str, Any], path: str) -> dict[str, Any]:
     if resolved not in reads:
         reads.append(resolved)
     state["read_paths"] = reads
+
+    tool_input_data = extract_tool_input(payload)
+    is_partial = bool(
+        tool_input_data.get("StartLine")
+        or tool_input_data.get("EndLine")
+        or tool_input_data.get("ContentOffset")
+    )
+    candidate = Path(path).expanduser()
+    if not is_partial and candidate.is_file():
+        read_hashes = state.setdefault("read_hashes", {})
+        digest = compute_file_sha256(candidate.resolve())
+        if digest:
+            read_hashes[str(candidate.resolve())] = digest
+
     persist_state(payload, state)
     return state
+
+
+def record_mutation(payload: dict[str, Any], path: str) -> None:
+    """Update recorded on-disk content hash after a successful tool mutation."""
+    if not path:
+        return
+    candidate = Path(path).expanduser()
+    if not candidate.is_file():
+        return
+    state = load_state(payload)
+    read_hashes = state.setdefault("read_hashes", {})
+    digest = compute_file_sha256(candidate.resolve())
+    if digest:
+        read_hashes[str(candidate.resolve())] = digest
+    persist_state(payload, state)
 
 
 def record_leave(payload: dict[str, Any], prompt: str) -> dict[str, Any]:
@@ -531,4 +577,76 @@ def find_write_deny_reason(
         return find_missing_planning_reason(
             path, inspect_planning_status(payload, state)
         )
+    return None
+
+
+def is_governed_working_tree_file(
+    payload: dict[str, Any], candidate: Path
+) -> bool:
+    """Return True if candidate is an existing file inside the workspace."""
+    if not candidate.is_file():
+        return False
+    workspace_root = resolve_workspace_root(payload).resolve()
+    try:
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(workspace_root):
+            return False
+    except (ValueError, OSError):
+        return False
+    if ".git" in resolved.parts:
+        return False
+    artifact_dir = payload.get("artifactDirectoryPath")
+    if artifact_dir:
+        try:
+            brain_root = Path(str(artifact_dir)).expanduser().resolve()
+            if resolved.is_relative_to(brain_root):
+                return False
+        except (ValueError, OSError):
+            pass
+    return True
+
+
+def find_drift_gate_reason(payload: dict[str, Any], path: str) -> str | None:
+    """Enforce working-tree drift and overwrite invariants (§ 201(c)(d)(e))."""
+    if not path:
+        return None
+    candidate = Path(path).expanduser()
+    if not is_governed_working_tree_file(payload, candidate):
+        return None
+
+    tool = normalize_tool(payload)
+    resolved_str = str(candidate.resolve())
+
+    if tool == "writetofile":
+        latest_request = extract_latest_user_request(payload)
+        if not ALLOW_FULL_OVERWRITE_RE.search(latest_request):
+            return (
+                "201_Execute_Act_Predicates.md § 201(d). Whole-file "
+                f"replacement via write_to_file on existing working-tree "
+                f"path '{path}' is prohibited. Use replace_file_content or "
+                "multi_replace_file_content. To allow full overwrite, the "
+                "prompt in the current turn must contain 'allow full "
+                "overwrite' (§ 201(e))."
+            )
+
+    if tool in {"replacefilecontent", "multireplacefilecontent"}:
+        state = load_state(payload)
+        read_hashes = state.get("read_hashes", {})
+        if resolved_str not in read_hashes:
+            return (
+                "201_Execute_Act_Predicates.md § 201(c). Read-before-write "
+                f"invariant: path '{path}' must be inspected in full with a "
+                "read tool (e.g. view_file) in the current session before "
+                "mutation."
+            )
+        current_hash = compute_file_sha256(candidate.resolve())
+        recorded_hash = read_hashes[resolved_str]
+        if current_hash != recorded_hash:
+            return (
+                "201_Execute_Act_Predicates.md § 201(c). Working-tree drift "
+                f"detected: current on-disk content hash of '{path}' does not "
+                "match the hash recorded during inspection in this session. "
+                "Re-inspect before mutation."
+            )
+
     return None

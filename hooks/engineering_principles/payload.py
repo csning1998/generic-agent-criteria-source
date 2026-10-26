@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -137,4 +138,48 @@ def extract_command(tool_input_data: dict[str, Any]) -> str:
         value = tool_input_data.get(key)
         if isinstance(value, str) and value.strip():
             return value
+    return ""
+
+
+def extract_latest_user_request(payload: dict[str, Any]) -> str:
+    """Return the latest user request text from the payload or transcript."""
+    direct = extract_prompt_text(payload)
+    if direct:
+        return direct
+    transcript_path = payload.get("transcriptPath") or payload.get(
+        "transcript_path"
+    )
+    if not transcript_path:
+        return ""
+    path = Path(str(transcript_path))
+    if not path.is_file():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    user_request_re = re.compile(
+        r"<USER_REQUEST>(.*?)</USER_REQUEST>", re.DOTALL | re.IGNORECASE
+    )
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") in {"USER_INPUT", "user"}:
+            content = event.get("content")
+            if not isinstance(content, str):
+                message = event.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+            if isinstance(content, str):
+                match = user_request_re.search(content)
+                if match:
+                    return match.group(1).strip()
+                return content.strip()
     return ""

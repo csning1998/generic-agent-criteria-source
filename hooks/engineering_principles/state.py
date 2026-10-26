@@ -78,6 +78,7 @@ def derive_empty_state(payload: dict[str, Any]) -> dict[str, Any]:
         "session_id": extract_session_id(payload),
         "workspace_root": str(resolve_workspace_root(payload)),
         "read_paths": [],
+        "read_hashes": {},
         "generic_leave": False,
         "generic_leave_modules": [],
         "guest_sql_leave": False,
@@ -101,6 +102,8 @@ def load_state(payload: dict[str, Any]) -> dict[str, Any]:
     merged.update(data)
     if not isinstance(merged.get("read_paths"), list):
         merged["read_paths"] = []
+    if not isinstance(merged.get("read_hashes"), dict):
+        merged["read_hashes"] = {}
     if not isinstance(merged.get("generic_leave_modules"), list):
         merged["generic_leave_modules"] = []
     if not isinstance(merged.get("skill_module_writes"), list):

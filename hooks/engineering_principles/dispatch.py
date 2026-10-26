@@ -59,46 +59,32 @@ def allow(extra: dict[str, Any] | None = None) -> int:
     return 0
 
 
-def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
-    """Evaluate a PreToolUse payload and deny forbidden writes."""
-    tool = normalize_tool(payload)
-    tool_input_data = extract_tool_input(payload)
-    path = extract_file_path(tool_input_data)
-    text = extract_new_text(tool_input_data)
-    command_text = extract_command(tool_input_data)
-    before = load_old_text(tool_input_data, path)
-    file_before = load_old_text({}, path)
-    root = str(resolve_workspace_root(payload))
-    cwd = str(payload.get("cwd") or root)
-    is_agy = bool(
-        payload.get("conversationId") or payload.get("workspacePaths")
-    )
-    exit_code = 0 if is_agy else 2
-
-    if tool in READ_TOOLS and path:
-        record_read(payload, path)
-        return allow()
-
-    if tool not in MUTATING_TOOLS:
-        return allow()
-
-    drift_reason = find_drift_gate_reason(payload, path)
-    if drift_reason:
-        return deny(drift_reason, exit_code=exit_code)
-
-    content = ""
-    if isinstance(tool_input_data.get("content"), str):
-        content = tool_input_data["content"]
-    elif isinstance(tool_input_data.get("contents"), str):
-        content = tool_input_data["contents"]
-    old_string = tool_input_data.get("old_string")
-    new_string = tool_input_data.get("new_string")
-    scan = derive_composed_module_text(
-        content,
+def _extract_module_scan_text(
+    tool_input_data: dict[str, Any], file_before: str
+) -> str:
+    """Derive composite module text from tool input strings."""
+    content = tool_input_data.get("content") or tool_input_data.get("contents")
+    content_str = content if isinstance(content, str) else ""
+    old_str = tool_input_data.get("old_string")
+    new_str = tool_input_data.get("new_string")
+    return derive_composed_module_text(
+        content_str,
         file_before,
-        old_string if isinstance(old_string, str) else "",
-        new_string if isinstance(new_string, str) else "",
+        old_str if isinstance(old_str, str) else "",
+        new_str if isinstance(new_str, str) else "",
     )
+
+
+def _find_module_stateless_violation(
+    tool_input_data: dict[str, Any],
+    path: str,
+    command_text: str,
+    file_before: str,
+    cwd: str,
+    root: str,
+) -> str | None:
+    """Return deny reason if modifying a skill module violates statelessness."""
+    scan = _extract_module_scan_text(tool_input_data, file_before)
     blobs = [
         item
         for item in (scan, *extract_shell_write_payloads(command_text))
@@ -106,10 +92,49 @@ def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
     ]
     for item in resolve_skill_module_paths(path, command_text, cwd, root):
         for blob in blobs:
-            module_reason = find_module_stateless_reason(item, blob)
-            if module_reason:
-                return deny(module_reason, exit_code=exit_code)
+            reason = find_module_stateless_reason(item, blob)
+            if reason:
+                return reason
+    return None
 
+
+def _resolve_pre_tool_exit_code(payload: dict[str, Any]) -> int:
+    """Return 0 for Antigravity payloads and 2 for standard harnesses."""
+    is_agy = bool(
+        payload.get("conversationId") or payload.get("workspacePaths")
+    )
+    return 0 if is_agy else 2
+
+
+def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
+    """Evaluate a PreToolUse payload and deny forbidden writes."""
+    tool = normalize_tool(payload)
+    tool_input_data = extract_tool_input(payload)
+    path = extract_file_path(tool_input_data)
+    if tool in READ_TOOLS and path:
+        record_read(payload, path)
+        return allow()
+
+    if tool not in MUTATING_TOOLS:
+        return allow()
+
+    exit_code = _resolve_pre_tool_exit_code(payload)
+    drift_reason = find_drift_gate_reason(payload, path)
+    if drift_reason:
+        return deny(drift_reason, exit_code=exit_code)
+
+    root = str(resolve_workspace_root(payload))
+    cwd = str(payload.get("cwd") or root)
+    command_text = extract_command(tool_input_data)
+    file_before = load_old_text({}, path)
+    module_reason = _find_module_stateless_violation(
+        tool_input_data, path, command_text, file_before, cwd, root
+    )
+    if module_reason:
+        return deny(module_reason, exit_code=exit_code)
+
+    text = extract_new_text(tool_input_data)
+    before = load_old_text(tool_input_data, path)
     reason = find_write_deny_reason(
         payload, path, text, command_text, before=before
     )

@@ -24,6 +24,7 @@ Load `~/.grok/skills/modules/shared/notion-mcp.md`.
     "op": "create",
     "target": {
         "data_source_id": "<data_source_id>",
+        "database_id": null,
         "page_id": null
     },
     "lookup": {
@@ -49,7 +50,7 @@ The JSON at `payload_path` MUST conform to this schema:
 }
 ```
 
-Top-level `icon`, `cover`, and `properties` inside `page` map directly onto Notion API parameters. `markdown_content` maps onto the page body via the Notion markdown endpoint. Do not accept ad-hoc property keys inline. For `update`, `target.page_id` is required.
+`page.icon`, `page.cover`, and `page.properties` map directly onto the Notion API parameters. `markdown_content` (a sibling of `page`) maps onto the page body via the Notion markdown endpoint. Do not accept ad-hoc property keys inline. For `update`, `target.page_id` is required. Return `ok` false when it is null.
 
 ## Process
 
@@ -57,13 +58,13 @@ Top-level `icon`, `cover`, and `properties` inside `page` map directly onto Noti
 2. For `lookup`, query `target.data_source_id` where `lookup.property` equals `lookup.value`. Return matching page IDs and URLs.
 3. For `create` or `update`, read `payload_path`. Walk every string value in the parsed JSON. If any string contains `{{`, `}}`, or `%{`, return `ok` false and `blocked_snippet`. Do not write.
 4. For `create`, call `POST https://api.notion.com/v1/pages` with:
-   - `parent`: `{"type": "data_source_id", "data_source_id": "<target.data_source_id>"}` (or `database_id` when target specifies database).
-   - `icon`: `page.icon` when non-null.
-   - `cover`: `page.cover` when non-null.
-   - `properties`: `page.properties`.
-   Obtain `page_id` and `url` from the response.
+    - `parent`: `{"type": "data_source_id", "data_source_id": "<target.data_source_id>"}` when `target.data_source_id` is non-null, or `{"type": "database_id", "database_id": "<target.database_id>"}` when `target.database_id` is non-null.
+    - `icon`: `page.icon` when non-null.
+    - `cover`: `page.cover` when non-null.
+    - `properties`: `page.properties`.
+      Obtain `page_id` and `url` from the response.
 5. If `markdown_content` is present and non-empty, call `PATCH https://api.notion.com/v1/pages/{page_id}/markdown` with `replace_content` to populate the page body without string truncation.
-6. For `update`, call `PATCH https://api.notion.com/v1/pages/{target.page_id}` with `icon`, `cover`, and `properties`. If `markdown_content` is present and non-empty, update the page body via the markdown endpoint.
+6. For `update`, if `target.page_id` is null or empty, return `ok` false with error `"target.page_id is required for update"`. Otherwise call `PATCH https://api.notion.com/v1/pages/{target.page_id}` with `page.icon`, `page.cover`, and `page.properties`. If `markdown_content` is present and non-empty, update the page body via the markdown endpoint.
 7. Return standard result.
 
 ## Output

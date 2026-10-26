@@ -59,20 +59,57 @@ def allow(extra: dict[str, Any] | None = None) -> int:
     return 0
 
 
+def _derive_chunks_module_text(chunks: list[Any], file_before: str) -> str:
+    """Derive composite module text from multi-replace chunks."""
+    result = file_before
+    accumulated: list[str] = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        target = chunk.get("TargetContent") or chunk.get("old_string") or ""
+        repl = chunk.get("ReplacementContent") or chunk.get("new_string") or ""
+        if isinstance(repl, str) and repl:
+            accumulated.append(repl)
+        if (
+            isinstance(target, str)
+            and isinstance(repl, str)
+            and target
+            and target in result
+        ):
+            result = result.replace(target, repl, 1)
+    if result != file_before:
+        return result
+    return "\n".join(accumulated)
+
+
 def _extract_module_scan_text(
     tool_input_data: dict[str, Any], file_before: str
 ) -> str:
     """Derive composite module text from tool input strings."""
-    content = tool_input_data.get("content") or tool_input_data.get("contents")
+    content = (
+        tool_input_data.get("content")
+        or tool_input_data.get("contents")
+        or tool_input_data.get("CodeContent")
+    )
     content_str = content if isinstance(content, str) else ""
-    old_str = tool_input_data.get("old_string")
-    new_str = tool_input_data.get("new_string")
-    return derive_composed_module_text(
+    old_str = tool_input_data.get("old_string") or tool_input_data.get(
+        "TargetContent"
+    )
+    new_str = tool_input_data.get("new_string") or tool_input_data.get(
+        "ReplacementContent"
+    )
+    base_text = derive_composed_module_text(
         content_str,
         file_before,
         old_str if isinstance(old_str, str) else "",
         new_str if isinstance(new_str, str) else "",
     )
+    if base_text:
+        return base_text
+    chunks = tool_input_data.get("ReplacementChunks")
+    if isinstance(chunks, list):
+        return _derive_chunks_module_text(chunks, file_before)
+    return ""
 
 
 def _find_module_stateless_violation(
@@ -221,11 +258,8 @@ def main() -> int:
         sys.stderr.write(f"engineering-principles hook error: {exc}\n")
         traceback.print_exc(file=sys.stderr)
         if event == "pretooluse" and normalize_tool(payload) in MUTATING_TOOLS:
-            is_agy = bool(
-                payload.get("conversationId") or payload.get("workspacePaths")
-            )
             return deny(
                 f"hook error while evaluating a write: {exc}",
-                exit_code=0 if is_agy else 2,
+                exit_code=_resolve_pre_tool_exit_code(payload),
             )
         return 0

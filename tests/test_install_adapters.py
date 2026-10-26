@@ -18,6 +18,7 @@ from adapter_install.install import inspect_spec_drift
 from adapter_install.install import main
 from adapter_install.install import reconcile_all_specs
 from adapter_install.install import reconcile_spec
+from adapter_install.install import render_expected_payload
 from adapter_install.install import resolve_dest
 from adapter_install.install import resolve_grok_root
 from adapter_install.install import resolve_source
@@ -489,3 +490,20 @@ def test_install_renders_agy_hooks_json(tmp_path: Path) -> None:
     assert str(grok_root.resolve()) in cmd
     assert "__REPO_ROOT__" not in cmd
     assert "<REPO>" not in cmd
+
+
+def test_render_expected_payload_template_quotes_path_with_spaces(
+    tmp_path: Path,
+) -> None:
+    """Template rendering preserves ' path when repo root contains spaces."""
+    source = _repo_root() / "hooks/adapters/antigravity/hooks.json"
+    spaced_root = tmp_path / "path with spaces"
+    payload_bytes = render_expected_payload(
+        source, MODE_TEMPLATE, grok_root=spaced_root
+    )
+    data = json.loads(payload_bytes.decode("utf-8"))
+    cmd = data["gacs-engineering-principles"]["SessionStart"][0]["command"]
+    assert str(spaced_root.resolve()) in cmd
+    assert (
+        f"'{spaced_root.resolve()}/hooks/bin/engineering-principles.py'" in cmd
+    )

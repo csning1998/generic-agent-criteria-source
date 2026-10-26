@@ -441,3 +441,100 @@ def test_agy_boundary_exemptions(
 
     _code, res = _run_pre_tool_use(payload)
     assert res.get("decision") == "allow"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "tool_args"),
+    [
+        (
+            "write_to_file",
+            {
+                "CodeContent": (
+                    "TABLE = {'title_contains':"
+                    " 'collection://12345678-1234-1234-1234-123456789abc'}\n"
+                ),
+                "Overwrite": True,
+            },
+        ),
+        (
+            "replace_file_content",
+            {
+                "TargetContent": "pass",
+                "ReplacementContent": (
+                    "TABLE = {'title_contains':"
+                    " 'collection://12345678-1234-1234-1234-123456789abc'}\n"
+                ),
+            },
+        ),
+        (
+            "multi_replace_file_content",
+            {
+                "ReplacementChunks": [
+                    {
+                        "TargetContent": "pass",
+                        "ReplacementContent": (
+                            "TABLE = {'title_contains':"
+                            " 'collection://12345678-1234-1234-1234-123456789abc'}\n"
+                        ),
+                    }
+                ],
+            },
+        ),
+    ],
+)
+def test_agy_skill_module_stateless_denial(
+    agy_workspace: Path,
+    tool_name: str,
+    tool_args: dict,
+) -> None:
+    """Deny stateful content when AGY tools write to skill modules."""
+    skill_dir = agy_workspace / "skills" / "skill-module-test" / "scripts"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    target = skill_dir / "tool.py"
+    target.write_text("pass\n", encoding="utf-8")
+
+    view_payload = _agy_payload(
+        "view_file",
+        {"AbsolutePath": str(target)},
+        workspace_paths=[str(agy_workspace)],
+    )
+    intercept_post_tool_use(view_payload)
+
+    args = dict(tool_args)
+    args["TargetFile"] = str(target)
+    payload = _agy_payload(
+        tool_name,
+        args,
+        workspace_paths=[str(agy_workspace)],
+    )
+    payload["prompt"] = "allow full overwrite"
+    code, res = _run_pre_tool_use(payload)
+    assert code == 0
+    assert res.get("decision") == "deny"
+    assert "a module MUST be stateless" in res.get("reason", "")
+
+
+def test_main_pre_tool_use_exception_uses_resolved_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Main delegates exit code selection to _resolve_pre_tool_exit_code."""
+    from engineering_principles.dispatch import main
+
+    payload = _agy_payload(
+        "write_to_file",
+        {"TargetFile": "/workspace/main.py", "CodeContent": "boom"},
+    )
+    monkeypatch.setattr(
+        "engineering_principles.dispatch.dispatch",
+        lambda _p: (_ for _ in ()).throw(
+            RuntimeError("simulated dispatch error")
+        ),
+    )
+    monkeypatch.setenv("GROK_HOOK_EVENT", "PreToolUse")
+    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
+    code = main()
+    assert code == 0
+    captured = capsys.readouterr()
+    res = json.loads(captured.out)
+    assert res.get("decision") == "deny"
+    assert "hook error while evaluating a write" in res.get("reason", "")

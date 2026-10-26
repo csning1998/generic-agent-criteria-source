@@ -23,6 +23,7 @@ Resident distill. Full TITLE text is not loaded. Specs live in `~/.agents/criter
 - During execution, the authorized mutation MUST be completed first (§ 105(f)). Debating or offering unsolicited alternatives is prohibited. Step reports MUST contain only the completed step result and the next step name. A concern in which following instructions would cause an execution error MAY appear as one sentence after the result. An isolated keyword match MUST NOT serve as ground for pushback.
 - Summarizing, restyling, or restructuring MUST NOT occur unless explicitly requested. Spell checking is permitted.
 - Operations MUST stay within the specified range. Out-of-range defects MUST be reported in text without modifying out-of-scope files.
+- On-disk file bytes are the single source of truth. An existing working-tree path MUST NOT be mutated unless the current session has read its current bytes and verified its content hash (§ 201(c)). Existing files MUST be mutated via block replacement tools (`replace_file_content` or `multi_replace_file_content`); whole-file replacement (`write_to_file` with `Overwrite: true`) is prohibited (§ 201(d)) unless the current owner turn contains the phrase `allow full overwrite` (§ 201(e)).
 
 ## Section 3. Routing
 

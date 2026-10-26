@@ -42,9 +42,10 @@ The PreToolUse hook inspects the tool name, the target path, and the text about 
 1. The PreToolUse hook denies a write in each of the following cases.
     1. The target path is inside a repository covered by Section 1, and the current session has not opened the files that Section 1 requires.
     2. The target path is a generic module, and the current session has no leave that covers that path.
-    3. The write adds an environment alias (`prod`, `stg`, `dev`) or adds `vault.production` or `vault = vault` inside a generic module.
-    4. The write adds a product name to a variable name, resource name, tag key, or output key inside a generic module.
-    5. The write adds a `local-exec` provisioner, a `remote-exec` provisioner, an Ansible `shell` or `command` task that lacks `changed_when` or `creates` or `removes`, a `psql` / `ALTER USER` / `community.postgresql` invocation inside a `terraform/`, `ansible/`, or `packer/` file, a mutating `psql` / `ALTER USER` invocation in any other write (including `scripts/`, a Makefile, and CI), or a mint (`random_password` or a vault-credential module call) inside a consumer layer. A read-only debug shell on a guest is outside this gate. Guest SQL that mutates state (password reset, dirty-flag clear) remains in scope.
+    3. The target path is an existing working-tree file that the current session has not opened with a read tool, or whose on-disk content hash has drifted from the inspected hash, or the write uses whole-file replacement (`write_to_file` with `Overwrite: true`) without the phrase `allow full overwrite` in the current owner prompt (§ 201(c) to (e)).
+    4. The write adds an environment alias (`prod`, `stg`, `dev`) or adds `vault.production` or `vault = vault` inside a generic module.
+    5. The write adds a product name to a variable name, resource name, tag key, or output key inside a generic module.
+    6. The write adds a `local-exec` provisioner, a `remote-exec` provisioner, an Ansible `shell` or `command` task that lacks `changed_when` or `creates` or `removes`, a `psql` / `ALTER USER` / `community.postgresql` invocation inside a `terraform/`, `ansible/`, or `packer/` file, a mutating `psql` / `ALTER USER` invocation in any other write (including `scripts/`, a Makefile, and CI), or a mint (`random_password` or a vault-credential module call) inside a consumer layer. A read-only debug shell on a guest is outside this gate. Guest SQL that mutates state (password reset, dirty-flag clear) remains in scope.
 
 A pre-existing fragment that already matched a forbidden pattern does not deny a write that only edits other lines. An image tag does not deny a write. A lock-file edit does not deny a write.
 

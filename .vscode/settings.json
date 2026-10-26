@@ -3,7 +3,6 @@
     "ruff.interpreter": [
         "${workspaceFolder}/.venv/bin/python"
     ],
-    "ruff.nativeServer": "on",
     "[python]": {
         "editor.defaultFormatter": "charliermarsh.ruff",
         "editor.tabSize": 4,
@@ -19,7 +18,7 @@
     },
     "files.associations": {
         "*.md": "markdown",
-        "*Skill.md": "markdown",
+        "*Skill.md": "markdown"
     },
     // Language specific overrides: Indent size of 4 with strict formatter for JSON
     "[markdown]": {
@@ -28,7 +27,7 @@
         "editor.detectIndentation": true,
         "editor.wordWrap": "on",
         "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "prettier.tabWidth": 4,
+        "prettier.tabWidth": 4
     },
     "[skill]": {
         "editor.insertSpaces": true,
@@ -50,4 +49,5 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
+    "r.lsp.promptToInstall": false
 }

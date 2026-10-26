@@ -92,6 +92,10 @@ LEAVE_GUEST_SQL_RE = re.compile(
     r"allow\s+guest\s+sql",
     re.I,
 )
+ALLOW_FULL_OVERWRITE_RE = re.compile(
+    r"\ballow\s+full\s+overwrite\b",
+    re.I,
+)
 BOOTSTRAPPER_NAME_RE = re.compile(r"bootstrapper", re.I)
 ARCHITECTURE_STEM_RE = re.compile(r"^architecture_(.+)$")
 
@@ -102,5 +106,9 @@ MUTATING_TOOLS = {
     "edit",
     "runterminalcommand",
     "bash",
+    "writetofile",
+    "replacefilecontent",
+    "multireplacefilecontent",
+    "runcommand",
 }
-READ_TOOLS = {"readfile", "read"}
+READ_TOOLS = {"readfile", "read", "viewfile"}

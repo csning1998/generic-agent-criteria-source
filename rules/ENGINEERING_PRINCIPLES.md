@@ -36,4 +36,10 @@ Version numbers, default values, command-line flags, and deprecation states MUST
 
 Citing versions from unverified memory outputs invalid flags and obsolete defaults.
 
-The PreToolUse hook blocks only statically verifiable actions defined in Section 1 through Section 4. Modifying shared modules requires the phrase `leave generic module` in the prompt. Disabling the hook requires setting `ENGINEERING_PRINCIPLES_HOOK=0`.
+## Section 7. Zero Working-Tree Drift
+
+On-disk file content is the single source of truth for repository state. Before mutating any existing working-tree file, the system MUST inspect its current on-disk content with a read tool. The system MUST NOT mutate the file if on-disk content has changed since the read (§ 201(c)). Mutations to existing files MUST use block replacement tools rather than whole-file replacement (§ 201(d)). Whole-file replacement (`write_to_file` with `Overwrite: true`) on an existing path is prohibited unless the current prompt contains the phrase `allow full overwrite` (§ 201(e)).
+
+Synthesizing whole-file content from conversation memory clobbers manual user edits and introduces silent working-tree drift.
+
+The PreToolUse hook blocks only statically verifiable actions defined in Section 1 through Section 4 and Section 7. Modifying shared modules requires the phrase `leave generic module` in the prompt. Disabling the hook requires setting `ENGINEERING_PRINCIPLES_HOOK=0`.

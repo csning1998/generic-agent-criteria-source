@@ -32,6 +32,7 @@ def extract_session_id(payload: dict[str, Any]) -> str:
         os.environ.get("GROK_SESSION_ID")
         or payload.get("sessionId")
         or payload.get("session_id")
+        or payload.get("conversationId")
     )
     if value:
         return str(value)
@@ -40,11 +41,20 @@ def extract_session_id(payload: dict[str, Any]) -> str:
 
 def resolve_workspace_root(payload: dict[str, Any]) -> Path:
     """Return the workspace root carried on the hook payload."""
+    workspace_paths = payload.get("workspacePaths")
+    first_path = ""
+    if (
+        isinstance(workspace_paths, list)
+        and workspace_paths
+        and isinstance(workspace_paths[0], str)
+    ):
+        first_path = workspace_paths[0]
     raw = (
         os.environ.get("GROK_WORKSPACE_ROOT")
         or os.environ.get("CLAUDE_PROJECT_DIR")
         or payload.get("workspaceRoot")
         or payload.get("workspace_root")
+        or first_path
         or payload.get("cwd")
         or os.getcwd()
     )

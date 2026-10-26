@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tomllib
 from pathlib import Path
 
 
+_AGENTS_DIR = ".agents"
+_CONTEXTS_FILE = "contexts.toml"
 _MISSING_CONFIG = "config file is absent"
 _MISSING_DIR = "docs_root directory is absent"
+_MISSING_SKILLS_PATH = "skills_path directory is absent"
 _USAGE = (
     "usage: resolve-context-docs.py "
-    "(--context ID | --socket ID) [--config PATH]"
+    "(--context ID | --socket ID) [--config PATH] [--workspace-root PATH]"
 )
 
 
@@ -24,6 +28,19 @@ def _derive_failure(context_id: str, error: str) -> dict[str, object]:
         "docs_root": None,
         "error": error,
     }
+
+
+def _load_toml_config(config_path: Path) -> dict[str, object] | None:
+    """Return parsed TOML mapping, or None if missing or invalid."""
+    if not config_path.is_file():
+        return None
+    try:
+        loaded = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    return loaded
 
 
 def _extract_context_section(
@@ -54,18 +71,64 @@ def _extract_required_names(
     return tuple(names)
 
 
+def _validate_required_files(docs: Path, names: tuple[str, ...]) -> str | None:
+    """Return missing file error if any required file is absent."""
+    for name in names:
+        if not (docs / name).is_file():
+            return f"required file is absent: {name}"
+    return None
+
+
+def _extract_socket_binding(
+    loaded: dict[str, object], socket_id: str
+) -> tuple[str, str] | str:
+    """Return (pack, skill), or an error string for socket_id."""
+    sockets = loaded.get("socket")
+    if not isinstance(sockets, dict):
+        return f"socket.{socket_id} is absent"
+    socket = sockets.get(socket_id)
+    if not isinstance(socket, dict):
+        return f"socket.{socket_id} is absent"
+    pack = socket.get("pack")
+    skill = socket.get("skill")
+    if not isinstance(pack, str) or not pack.strip():
+        return f"socket.{socket_id}.pack is absent"
+    if not isinstance(skill, str) or not skill.strip():
+        return f"socket.{socket_id}.skill is absent"
+    return pack, skill
+
+
+def _resolve_contained_directory(
+    config_path: Path, raw_path: str
+) -> Path | None:
+    """Return an absolute directory resolved within base, or None."""
+    path_raw = Path(raw_path).expanduser()
+    if not path_raw.is_absolute():
+        base = config_path.parent
+        if base.name == _AGENTS_DIR:
+            base = base.parent
+        resolved = (base / path_raw).resolve()
+        if not resolved.is_relative_to(base.resolve()):
+            return None
+    else:
+        resolved = path_raw.resolve()
+    if not resolved.is_dir():
+        return None
+    return resolved
+
+
 def resolve_context_docs_root(
     config_path: Path, context_id: str
 ) -> dict[str, object]:
     """Return ok, an absolute docs_root, and error for context_id."""
-    if not config_path.is_file():
-        return _derive_failure(context_id, _MISSING_CONFIG)
-    try:
-        loaded = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
-        return _derive_failure(context_id, f"context.{context_id} is absent")
-    if not isinstance(loaded, dict):
-        return _derive_failure(context_id, f"context.{context_id} is absent")
+    loaded = _load_toml_config(config_path)
+    if loaded is None:
+        err = (
+            _MISSING_CONFIG
+            if not config_path.is_file()
+            else f"context.{context_id} is absent"
+        )
+        return _derive_failure(context_id, err)
     section = _extract_context_section(loaded, context_id)
     if isinstance(section, str):
         return _derive_failure(context_id, section)
@@ -77,14 +140,12 @@ def resolve_context_docs_root(
     names = _extract_required_names(section, context_id)
     if isinstance(names, str):
         return _derive_failure(context_id, names)
-    docs = Path(raw).expanduser().resolve()
-    if not docs.is_dir():
+    docs = _resolve_contained_directory(config_path, raw)
+    if docs is None:
         return _derive_failure(context_id, _MISSING_DIR)
-    for name in names:
-        if not (docs / name).is_file():
-            return _derive_failure(
-                context_id, f"required file is absent: {name}"
-            )
+    file_err = _validate_required_files(docs, names)
+    if file_err is not None:
+        return _derive_failure(context_id, file_err)
     return {
         "ok": True,
         "context_id": context_id,
@@ -109,38 +170,18 @@ def resolve_catalog_socket(
     config_path: Path, socket_id: str
 ) -> dict[str, object]:
     """Return the pack skill declared for socket_id."""
-    if not config_path.is_file():
-        return _derive_socket_failure(socket_id, _MISSING_CONFIG)
-    try:
-        loaded = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
-        return _derive_socket_failure(
-            socket_id, f"socket.{socket_id} is absent"
+    loaded = _load_toml_config(config_path)
+    if loaded is None:
+        err = (
+            _MISSING_CONFIG
+            if not config_path.is_file()
+            else f"socket.{socket_id} is absent"
         )
-    if not isinstance(loaded, dict):
-        return _derive_socket_failure(
-            socket_id, f"socket.{socket_id} is absent"
-        )
-    sockets = loaded.get("socket")
-    if not isinstance(sockets, dict):
-        return _derive_socket_failure(
-            socket_id, f"socket.{socket_id} is absent"
-        )
-    socket = sockets.get(socket_id)
-    if not isinstance(socket, dict):
-        return _derive_socket_failure(
-            socket_id, f"socket.{socket_id} is absent"
-        )
-    pack = socket.get("pack")
-    skill = socket.get("skill")
-    if not isinstance(pack, str) or not pack.strip():
-        return _derive_socket_failure(
-            socket_id, f"socket.{socket_id}.pack is absent"
-        )
-    if not isinstance(skill, str) or not skill.strip():
-        return _derive_socket_failure(
-            socket_id, f"socket.{socket_id}.skill is absent"
-        )
+        return _derive_socket_failure(socket_id, err)
+    binding = _extract_socket_binding(loaded, socket_id)
+    if isinstance(binding, str):
+        return _derive_socket_failure(socket_id, binding)
+    pack, skill = binding
     section = _extract_context_section(loaded, pack)
     if isinstance(section, str):
         return _derive_socket_failure(socket_id, section)
@@ -154,11 +195,9 @@ def resolve_catalog_socket(
         return _derive_socket_failure(
             socket_id, f"context.{pack}.skills_path is absent"
         )
-    skills_path = Path(raw_path).expanduser().resolve()
-    if not skills_path.is_dir():
-        return _derive_socket_failure(
-            socket_id, "skills_path directory is absent"
-        )
+    skills_path = _resolve_contained_directory(config_path, raw_path)
+    if skills_path is None:
+        return _derive_socket_failure(socket_id, _MISSING_SKILLS_PATH)
     return {
         "ok": True,
         "socket_id": socket_id,
@@ -194,9 +233,9 @@ def resolve_catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
         raw_path = section.get("skills_path")
         if not isinstance(raw_path, str) or not raw_path.strip():
             return f"context.{pack_id}.skills_path is absent"
-        root = Path(raw_path).expanduser().resolve()
-        if not root.is_dir():
-            return "skills_path directory is absent"
+        root = _resolve_contained_directory(config_path, raw_path)
+        if root is None:
+            return _MISSING_SKILLS_PATH
         for name in listed:
             if (
                 not isinstance(name, str)
@@ -215,24 +254,61 @@ def resolve_catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
     return sources
 
 
-def resolve_catalog_path(grok_root: Path) -> Path:
-    """Return the catalog file in the repository."""
-    return grok_root / "config" / "contexts.toml"
+def resolve_catalog_path(
+    criteria_root: Path,
+    workspace_root: Path | None = None,
+    home_root: Path | None = None,
+) -> Path:
+    """Return the catalog file in workspace, user home, or criteria repo."""
+    opt_in = workspace_root
+    if opt_in is None:
+        raw_env = (
+            os.environ.get("AGENT_WORKSPACE_ROOT")
+            or os.environ.get("ANTIGRAVITY_WORKSPACE_ROOT")
+            or os.environ.get("GROK_WORKSPACE_ROOT")
+        )
+        if raw_env and raw_env.strip():
+            opt_in = Path(raw_env).expanduser().resolve()
+    if opt_in is not None:
+        candidate_agents = opt_in / _AGENTS_DIR / _CONTEXTS_FILE
+        if candidate_agents.is_file():
+            return candidate_agents
+    home = home_root if home_root is not None else Path.home()
+    for candidate in (
+        home / _AGENTS_DIR / _CONTEXTS_FILE,
+        home / ".gemini" / _CONTEXTS_FILE,
+        home / ".claude" / _CONTEXTS_FILE,
+        home / ".grok" / _CONTEXTS_FILE,
+    ):
+        if candidate.is_file():
+            return candidate
+    return criteria_root / "config" / _CONTEXTS_FILE
 
 
 def _parse_cli_arguments(args: list[str]) -> tuple[Path, str, str] | str:
     """Return config path, mode, and id, or a usage error."""
-    config = resolve_catalog_path(Path(__file__).resolve().parents[2])
+    criteria_root = Path(__file__).resolve().parents[2]
+    config: Path | None = None
+    workspace_root: Path | None = None
     context_id = ""
     socket_id = ""
     index = 0
     while index < len(args):
         flag = args[index]
-        needs_value = flag in ("--config", "--context", "--socket")
+        needs_value = flag in (
+            "--config",
+            "--context",
+            "--socket",
+            "--workspace-root",
+        )
         if needs_value and index + 1 >= len(args):
             return _USAGE
         if flag == "--config":
             config = Path(args[index + 1])
+            index += 2
+            continue
+        if flag == "--workspace-root":
+            workspace_root = Path(args[index + 1]).expanduser().resolve()
             index += 2
             continue
         if flag == "--context":
@@ -246,6 +322,8 @@ def _parse_cli_arguments(args: list[str]) -> tuple[Path, str, str] | str:
         return _USAGE
     if bool(context_id.strip()) == bool(socket_id.strip()):
         return _USAGE
+    if config is None:
+        config = resolve_catalog_path(criteria_root, workspace_root)
     if context_id.strip():
         return config, "context", context_id
     return config, "socket", socket_id

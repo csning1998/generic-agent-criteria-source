@@ -32,7 +32,7 @@ Read `~/.grok/skills/modules/shared/write-gate.md`.
 1. Fill `{"project": ..., "mr_iid": ..., "mode": "fetch"}` and call `~/.grok/skills/skill-module-gitlab-mr-discussions/SKILL.md`.
 2. For each unresolved thread, read the file and line the thread names at its current committed state. Verify the claim against that content, a live command, or a test run. A thread MUST NOT be marked confirmed on the reviewer's wording alone.
 3. Classify each thread `confirmed`, `refuted`, or `partial`. Cite the evidence for `confirmed` and for `refuted`: the file diff, the command run, and its output.
-4. Apply a code fix for every `confirmed` and `partial` thread, in this turn, using the ordinary file-edit tools. This step is outside the module boundary.
+4. Apply a code fix for every `confirmed` and `partial` thread, in this turn, using the ordinary file-edit tools. This step is outside the module boundary. When the repository contains an automated test suite, code modifications MUST follow test-driven development (TDD), writing a failing test and observing test failure before modifying code.
 5. Run the repository's own lint and validate commands against every file this layer touched. A thread whose fix fails that check stays `confirmed` but unresolved; report the failure instead of proceeding.
 6. Build the `actions` list.
     1. A `confirmed` or `partial` thread whose fix passed defaults to `{"do": "resolve"}`.

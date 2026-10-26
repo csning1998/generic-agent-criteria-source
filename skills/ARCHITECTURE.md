@@ -18,7 +18,7 @@ Every layer and every module uses these sections:
 
 A later layer consumes a named artifact. The later layer does not reopen an upstream module to recompute a field.
 
-If the Notion API changes, only `skill-module-file-notion-resources` changes. yt-dlp and Buzz modules stay untouched.
+If the Notion API changes, only `skill-module-notion-page` and `skill-module-notion-query` change. yt-dlp and Buzz modules stay untouched.
 
 ## Section 2. Naming
 
@@ -40,8 +40,8 @@ Frontmatter `effort` on each `SKILL.md` is the spawn budget. Roles live in `~/.g
 
 ### Item B. Knowledge filing
 
-- Modules: `skill-module-inspect-second-brain`, `skill-module-file-notion-resources`
-- Artifacts: `SecondBrainLocate`, `NotionWriteResult`
+- Modules: `skill-module-notion-page`
+- Artifacts: `NotionPageResult`
 
 External layers that call these modules are catalog sockets.
 
@@ -53,13 +53,13 @@ External layers that call these modules are catalog sockets.
     - `skill-layer-review-gitlab-mr-comments`
 - Modules
     - `skill-module-inspect-gitlab-mrs`
-    - `skill-module-inspect-notion-tasks`
-    - `skill-module-file-notion-resources`
+    - `skill-module-notion-query`
+    - `skill-module-notion-page`
     - `skill-module-gitlab-mr-labels`
     - `skill-module-gitlab-mr-discussions`
 - Artifacts
     - `GitlabMrList`
-    - `NotionTaskRows`
+    - `NotionQueryResult`
     - `GitlabMrLabelResult`
     - `GitlabMrCommentTriageResult`
     - `GitlabMrDiscussionsResult`

@@ -32,7 +32,7 @@ The operational face MUST be partitioned using the predicates defined in § 201.
 
 Enforcement tokens for Scenario frontmatter `verdict:` and for the table below are the following values: `deny`, `gate_until_read`, `gate_once`, `rules`, `Permission check, deny mechanism`, `Skill invocation (X)`, `Stop hook scan`, and `Resident distill`.
 
-- Local execute: A non-read-only tool call which alters the working-tree content hash (digest of file bytes, excluding `.git/`). A metadata-only modification with unchanged bytes is not a local execute act.
+- Local execute: A non-read-only tool call which alters the working-tree content hash (digest of file bytes, excluding `.git/`). A metadata-only modification with unchanged bytes is not a local execute act. A local execute act on an existing path requires prior inspection of on-disk bytes (§ 201(c)) and block replacement (§ 201(d)) unless authorized via overwrite leave (§ 201(e)).
 - External execute: A write operation targeting an external system, including `git commit`, `git push`, merge request operations, MCP writes, outbound messages, issue creation, and CI pipeline triggers.
 - When both a local execute act and an external execute act apply, the local execute act MUST take precedence.
 

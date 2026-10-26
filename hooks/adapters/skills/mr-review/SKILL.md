@@ -14,7 +14,7 @@ Process aligns to `references/308_Merge_Request_Review_Handling.md`. This skill 
 
 1. Fetch unresolved discussions for the named merge request. Limit the set only when the owner named discussion identifiers or file paths in this turn.
 2. Verify each claim against current repository content, a live command, or a test run. Classify each thread as `confirmed`, `partial`, or `refuted`. Name the evidence for every `confirmed` verdict and every `refuted` verdict.
-3. Repair only `confirmed` claims and the standing portion of `partial` claims which the owner named or explicitly authorized in this turn. Run the repository test and linter commands which apply to every touched file in the same turn.
+3. Repair only `confirmed` claims and the standing portion of `partial` claims which the owner named or explicitly authorized in this turn. When the target repository contains an automated test suite, repair MUST follow § 202 Test Driven Development by writing a failing test first. Run the repository test and linter commands which apply to every touched file in the same turn.
 4. Report classification and evidence. Set `allow_resolve` true only when the owner explicitly asked to resolve in this turn. Set `allow_reply` true only when the owner separately and explicitly asked to reply in this turn. An ask which covers one flag MUST NOT set the other.
 
 Creating a commit, pushing, or applying reply or resolve on GitLab MUST NOT occur unless the owner explicitly requested that external act in the current turn.

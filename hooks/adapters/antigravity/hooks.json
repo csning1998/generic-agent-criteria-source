@@ -1,0 +1,42 @@
+{
+    "gacs-engineering-principles": {
+        "SessionStart": [
+            {
+                "type": "command",
+                "command": "GROK_HOOK_EVENT=SessionStart python3 __REPO_ROOT__/hooks/bin/engineering-principles.py",
+                "timeout": 15
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "write_to_file|replace_file_content|multi_replace_file_content|run_command|view_file",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "GROK_HOOK_EVENT=PreToolUse python3 __REPO_ROOT__/hooks/bin/engineering-principles.py",
+                        "timeout": 15
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "write_to_file|replace_file_content|multi_replace_file_content|run_command|view_file",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "GROK_HOOK_EVENT=PostToolUse python3 __REPO_ROOT__/hooks/bin/engineering-principles.py",
+                        "timeout": 15
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "type": "command",
+                "command": "GROK_HOOK_EVENT=Stop python3 __REPO_ROOT__/hooks/bin/engineering-principles.py",
+                "timeout": 15
+            }
+        ]
+    }
+}

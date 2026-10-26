@@ -18,6 +18,7 @@ from adapter_install.cursor_mdc import render_cursor_mdc
 MODE_SYMLINK = "symlink"
 MODE_COPY = "copy"
 MODE_CURSOR_MDC = "cursor-mdc"
+MODE_TEMPLATE = "template"
 _ALLOWED_PREFIXES = (
     ".agents/",
     ".claude/",
@@ -214,6 +215,11 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
         dest=".gemini/config/skills",
         mode=MODE_SYMLINK,
     ),
+    AdapterSpec(
+        source="hooks/adapters/antigravity/hooks.json",
+        dest=".gemini/config/hooks.json",
+        mode=MODE_TEMPLATE,
+    ),
 )
 
 
@@ -268,12 +274,19 @@ def validate_dest_rel(dest_rel: str) -> None:
 
 def _validate_specs() -> None:
     for spec in SPECS:
-        if spec.mode not in (MODE_SYMLINK, MODE_COPY, MODE_CURSOR_MDC):
+        if spec.mode not in (
+            MODE_SYMLINK,
+            MODE_COPY,
+            MODE_CURSOR_MDC,
+            MODE_TEMPLATE,
+        ):
             raise ValueError(f"unknown mode {spec.mode}")
         validate_dest_rel(spec.dest)
-        if spec.mode in (MODE_COPY, MODE_CURSOR_MDC) and spec.dest.endswith(
-            "/"
-        ):
+        if spec.mode in (
+            MODE_COPY,
+            MODE_CURSOR_MDC,
+            MODE_TEMPLATE,
+        ) and spec.dest.endswith("/"):
             raise ValueError(f"copy dest is a directory {spec.dest}")
         if spec.mode == MODE_CURSOR_MDC:
             if not spec.scenario_id:
@@ -379,13 +392,24 @@ def _find_files(root: Path) -> tuple[Path, ...]:
 
 
 def render_expected_payload(
-    source: Path, mode: str, *, scenario_id: str | None = None
+    source: Path,
+    mode: str,
+    *,
+    scenario_id: str | None = None,
+    grok_root: Path | None = None,
 ) -> bytes:
     """Return dest bytes for copy-like modes."""
     if mode == MODE_CURSOR_MDC:
         if not scenario_id:
             raise ValueError("cursor render is missing scenario_id")
         return render_cursor_mdc(source, scenario_id=scenario_id)
+    if mode == MODE_TEMPLATE:
+        root = (grok_root or resolve_grok_root()).resolve()
+        raw = source.read_text(encoding="utf-8")
+        rendered = raw.replace("__REPO_ROOT__", str(root)).replace(
+            "<REPO>", str(root)
+        )
+        return rendered.encode("utf-8")
     return _load_file_bytes(source)
 
 
@@ -436,29 +460,41 @@ def _inspect_symlink_state(dest: Path, source: Path) -> str:
 
 
 def _inspect_copy_state(
-    dest: Path, source: Path, mode: str, scenario_id: str | None
+    dest: Path,
+    source: Path,
+    mode: str,
+    scenario_id: str | None,
+    *,
+    grok_root: Path | None = None,
 ) -> str:
     """Evaluate drift when spec expects a copy or rendered mdc."""
     if dest.is_symlink():
         return "symlink-for-copy"
     if dest.is_file() and source.is_file():
         expected = render_expected_payload(
-            source, mode, scenario_id=scenario_id
+            source, mode, scenario_id=scenario_id, grok_root=grok_root
         )
         return "ok" if _load_file_bytes(dest) == expected else "copy-differs"
     return "unexpected-type"
 
 
 def inspect_dest_drift(
-    dest: Path, source: Path, mode: str, *, scenario_id: str | None = None
+    dest: Path,
+    source: Path,
+    mode: str,
+    *,
+    scenario_id: str | None = None,
+    grok_root: Path | None = None,
 ) -> str:
     """Return ok, missing, or a drift token for one dest."""
     if not dest.exists() and not dest.is_symlink():
         return "missing"
     if mode == MODE_SYMLINK:
         return _inspect_symlink_state(dest, source)
-    if mode in (MODE_COPY, MODE_CURSOR_MDC):
-        return _inspect_copy_state(dest, source, mode, scenario_id)
+    if mode in (MODE_COPY, MODE_CURSOR_MDC, MODE_TEMPLATE):
+        return _inspect_copy_state(
+            dest, source, mode, scenario_id, grok_root=grok_root
+        )
     return "unexpected-type"
 
 
@@ -473,7 +509,11 @@ def inspect_spec_drift(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     if _is_skills_directory_spec(spec):
         return _inspect_skills_directory(grok_root, home, dest_rel=spec.dest)
     state = inspect_dest_drift(
-        dest, source, spec.mode, scenario_id=spec.scenario_id
+        dest,
+        source,
+        spec.mode,
+        scenario_id=spec.scenario_id,
+        grok_root=grok_root,
     )
     if state == "ok":
         return "ok"
@@ -630,7 +670,11 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     if _is_skills_directory_spec(spec):
         return _reconcile_skills_directory(grok_root, home, dest_rel=spec.dest)
     state = inspect_dest_drift(
-        dest, source, spec.mode, scenario_id=spec.scenario_id
+        dest,
+        source,
+        spec.mode,
+        scenario_id=spec.scenario_id,
+        grok_root=grok_root,
     )
     if state == "ok":
         return "skipped"
@@ -643,7 +687,11 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
     if not _is_dest_parent_under_home(home, dest):
         return "dest-escapes"
     state = inspect_dest_drift(
-        dest, source, spec.mode, scenario_id=spec.scenario_id
+        dest,
+        source,
+        spec.mode,
+        scenario_id=spec.scenario_id,
+        grok_root=grok_root,
     )
     if state == "ok":
         return "skipped"
@@ -673,7 +721,10 @@ def reconcile_spec(grok_root: Path, home: Path, spec: AdapterSpec) -> str:
         with os.fdopen(fd, "wb") as handle:
             handle.write(
                 render_expected_payload(
-                    source, spec.mode, scenario_id=spec.scenario_id
+                    source,
+                    spec.mode,
+                    scenario_id=spec.scenario_id,
+                    grok_root=grok_root,
                 )
             )
         if spec.mode == MODE_COPY and source.stat().st_mode & 0o111:

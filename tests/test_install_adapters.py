@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
 import pytest
 from adapter_install.install import MODE_COPY
 from adapter_install.install import MODE_SYMLINK
+from adapter_install.install import MODE_TEMPLATE
 from adapter_install.install import SPECS
 from adapter_install.install import AdapterSpec
 from adapter_install.install import _clear_replaceable_tree
@@ -464,3 +466,26 @@ def test_reconcile_all_specs_prints_aborted_label(
     assert (
         "ABORTED .agents/AGENTS.md: regular-differs" in capsys.readouterr().out
     )
+
+
+def test_install_renders_agy_hooks_json(tmp_path: Path) -> None:
+    """The Antigravity hooks.json template renders with absolute repo root."""
+    grok_root = _repo_root()
+    home = tmp_path / "home"
+    home.mkdir()
+    spec = AdapterSpec(
+        source="hooks/adapters/antigravity/hooks.json",
+        dest=".gemini/config/hooks.json",
+        mode=MODE_TEMPLATE,
+    )
+    result = reconcile_spec(grok_root, home, spec)
+    assert result == "applied"
+    dest = home / ".gemini" / "config" / "hooks.json"
+    assert dest.is_file()
+    data = json.loads(dest.read_text(encoding="utf-8"))
+    assert "gacs-engineering-principles" in data
+    hook_cfg = data["gacs-engineering-principles"]
+    cmd = hook_cfg["PreToolUse"][0]["hooks"][0]["command"]
+    assert str(grok_root.resolve()) in cmd
+    assert "__REPO_ROOT__" not in cmd
+    assert "<REPO>" not in cmd

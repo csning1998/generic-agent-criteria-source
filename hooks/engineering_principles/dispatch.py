@@ -34,12 +34,12 @@ from engineering_principles.state import load_state
 from engineering_principles.state import resolve_workspace_root
 
 
-def deny(reason: str) -> int:
-    """Print a deny decision and return exit code 2."""
+def deny(reason: str, exit_code: int = 2) -> int:
+    """Print a deny decision and return the specified exit code."""
     print(
         json.dumps({"decision": "deny", "reason": reason}, ensure_ascii=False)
     )
-    return 2
+    return exit_code
 
 
 def block_stop(reason: str) -> int:
@@ -70,6 +70,10 @@ def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
     file_before = load_old_text({}, path)
     root = str(resolve_workspace_root(payload))
     cwd = str(payload.get("cwd") or root)
+    is_agy = bool(
+        payload.get("conversationId") or payload.get("workspacePaths")
+    )
+    exit_code = 0 if is_agy else 2
 
     if tool in READ_TOOLS and path:
         record_read(payload, path)
@@ -80,7 +84,7 @@ def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
 
     drift_reason = find_drift_gate_reason(payload, path)
     if drift_reason:
-        return deny(drift_reason)
+        return deny(drift_reason, exit_code=exit_code)
 
     content = ""
     if isinstance(tool_input_data.get("content"), str):
@@ -104,13 +108,13 @@ def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
         for blob in blobs:
             module_reason = find_module_stateless_reason(item, blob)
             if module_reason:
-                return deny(module_reason)
+                return deny(module_reason, exit_code=exit_code)
 
     reason = find_write_deny_reason(
         payload, path, text, command_text, before=before
     )
     if reason:
-        return deny(reason)
+        return deny(reason, exit_code=exit_code)
     return allow()
 
 
@@ -192,5 +196,11 @@ def main() -> int:
         sys.stderr.write(f"engineering-principles hook error: {exc}\n")
         traceback.print_exc(file=sys.stderr)
         if event == "pretooluse" and normalize_tool(payload) in MUTATING_TOOLS:
-            return deny(f"hook error while evaluating a write: {exc}")
+            is_agy = bool(
+                payload.get("conversationId") or payload.get("workspacePaths")
+            )
+            return deny(
+                f"hook error while evaluating a write: {exc}",
+                exit_code=0 if is_agy else 2,
+            )
         return 0

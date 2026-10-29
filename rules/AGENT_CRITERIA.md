@@ -31,4 +31,18 @@ The matching scenario file and files listed under `load:` MUST be opened. Preloa
 
 ## Section 4. Coding short list
 
-The criteria source repository MUST satisfy the clauses which the repository publishes. Repository conventions MUST be matched. When repository style is absent, Google Style Guides MUST be followed. Comments, commit messages, and technical documentation MUST use RFC 2119 keywords on an ISO/IEC requirements skeleton with one requirement per sentence. Dialogue MUST follow § 301. Technical documentation MUST state the current constraint, the chosen path, and the associated cost. Theoretical explanations MUST reside in a narrative file or runbook. Comments MUST NOT be written unless non-obvious rationale or trade-offs are absent from code. Writing explanations of what source code already demonstrates is prohibited. Comments MUST have an upper bound of three lines and one claim. Identifier names MUST use a leading verb rather than preposition suffixes (`xFor`, `xOf`, `xFrom`). Translation operations MUST conform to the translate scenario. TDD work MUST follow § 202 and the `tdd-cycle` skill. Merge request review comment handling MUST follow § 203 and the `mr-review` skill.
+- The criteria source repository MUST satisfy the clauses which the repository publishes.
+- Repository conventions MUST be matched.
+- When repository style is absent, Google Style Guides MUST be followed.
+- Normative specifications in technical documentation MUST use RFC 2119 keywords on an ISO/IEC requirements skeleton with one requirement per sentence.
+- Non-normative content, comments, and commit messages MUST NOT force RFC 2119 keywords.
+- Dialogue MUST follow § 301.
+- Technical documentation MUST state the current constraint, the chosen path, and the associated cost.
+- Theoretical explanations MUST reside in a narrative file or runbook.
+- Comments MUST NOT be written unless documenting non-obvious constraints or design trade-offs.
+- Writing explanations of what source code already demonstrates is prohibited.
+- Comments MUST have an upper bound of three lines and one claim.
+- Identifier names MUST use a leading verb rather than preposition suffixes (`xFor`, `xOf`, `xFrom`).
+- Translation operations MUST conform to the translate scenario.
+- TDD work MUST follow § 202 and the `tdd-cycle` skill.
+- Merge request review comment handling MUST follow § 203 and the `mr-review` skill.

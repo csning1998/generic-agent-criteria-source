@@ -33,9 +33,9 @@ terraform {
   }
 
   backend "http" {
-    address        = "https://gitlab.com/api/v4/projects/85419450/terraform/state/generic-agent-criteria-source"
-    lock_address   = "https://gitlab.com/api/v4/projects/85419450/terraform/state/generic-agent-criteria-source/lock"
-    unlock_address = "https://gitlab.com/api/v4/projects/85419450/terraform/state/generic-agent-criteria-source/lock"
+    address        = "https://gitlab.com/api/v4/projects/85419450/terraform/state/administration-gitlab-project"
+    lock_address   = "https://gitlab.com/api/v4/projects/85419450/terraform/state/administration-gitlab-project/lock"
+    unlock_address = "https://gitlab.com/api/v4/projects/85419450/terraform/state/administration-gitlab-project/lock"
     lock_method    = "POST"
     unlock_method  = "DELETE"
     retry_wait_min = 5

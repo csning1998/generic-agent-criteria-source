@@ -1,6 +1,28 @@
 # **§ 305. Style and Markings**
 
-- **(a) Applicable Scope**：The criteria source repository is the Git working tree which publishes the clause files under `hooks/criteria/`. Every tracked file in the criteria source repository MUST satisfy the clauses which apply to the file's path glob. A clause file is not exempt from § 305(b) or from `markdown.md`. Clause (a) applies to English writing in technical documentation, MR/PR descriptions, comments, and commit messages, regardless of language medium. Dialogue follows § 301. Written English MUST follow IETF RFC Style [RFC 7322](https://www.rfc-editor.org/rfc/rfc7322) with [RFC 2119 keywords](https://www.rfc-editor.org/rfc/rfc2119) on an [ISO/IEC Directives Part 2 requirements skeleton](https://www.iso.org/sites/directives/current/part2/index.xhtml). The ISO/IEC Directives Part 2 requirements skeleton mandates one requirement per sentence. The skeleton mandates a definition placed before the rule which uses the defined term. The skeleton mandates an impersonal indicative mood. A technical document MUST state the current constraint. A technical document MUST state the chosen path. A technical document MUST state the cost of the chosen path. Theory derivation, origin history, and a full mechanism walkthrough MUST be written in a narrative file or a runbook. A technical document MUST describe only the settled architecture. A technical document MUST NOT describe the review or correction process which produced the architecture. The dialogue analog of this prohibition is stated in § 301(c)(3) and § 301(c)(4). A sentence directed at a specific past commenter is prohibited. Examples include "this corrects the prior claim that" and "a check block was considered first and rejected". The settled design MUST appear as plain fact instead. A reader with no memory of the conversation which produced the document MUST be able to understand the document fully from its own text. A term which this document binds MUST receive one definition sentence immediately before the rule which uses the bound term. Author, year, and paper type are not required for the definition sentence. Comment content and code-adjacent notes follow § 304. Non-code translation follows § 110.
+- **(a) Applicable Scope**：
+    - The criteria source repository is the Git working tree which publishes the clause files under `hooks/criteria/`.
+    - Every tracked file in the criteria source repository MUST satisfy the clauses which apply to the file's path glob.
+    - A clause file is not exempt from § 305(b) or from `markdown.md`.
+    - Clause (a) applies to normative English writing in technical documentation and criteria specifications, regardless of language medium.
+    - Non-normative content, comments, and commit messages MUST NOT force RFC 2119 keywords.
+    - Dialogue follows § 301.
+    - Normative written English MUST follow IETF RFC Style [RFC 7322](https://www.rfc-editor.org/rfc/rfc7322) with [RFC 2119 keywords](https://www.rfc-editor.org/rfc/rfc2119) on an [ISO/IEC Directives Part 2 requirements skeleton](https://www.iso.org/sites/directives/current/part2/index.xhtml).
+    - The ISO/IEC Directives Part 2 requirements skeleton mandates one requirement per sentence.
+    - The skeleton mandates a definition placed before the rule which uses the defined term.
+    - The skeleton mandates an impersonal indicative mood.
+    - A technical document MUST state the current constraint, chosen path, and the cost of the chosen path.
+    - Theory derivation, origin history, and a full mechanism walkthrough MUST be written in a narrative file or a runbook.
+    - A technical document MUST describe only the settled architecture.
+    - A technical document MUST NOT describe the review or correction process which produced the architecture.
+    - The dialogue analog of this prohibition is stated in § 301(c)(3) and § 301(c)(4).
+    - A sentence directed at a specific past commenter is prohibited. Examples include "this corrects the prior claim that" and "a check block was considered first and rejected".
+    - The settled design MUST appear as plain fact instead.
+    - A reader with no memory of the conversation which produced the document MUST be able to understand the document fully from its own text.
+    - A term which this document binds MUST receive one definition sentence immediately before the rule which uses the bound term.
+    - Author, year, and paper type are not required for the definition sentence.
+    - Comment content and code-adjacent notes follow § 304.
+    - Non-code translation follows § 110.
 - **(b) Style and Syntactic Constraints (IETF RFC Supplements)**：
     - **English Quality and Syntactic Standards**：English in technical documentation, MR/PR descriptions, comments, and commit messages MUST satisfy the following rules. Dialogue follows § 301.
         - **Semantics and Syntactic Structure**：Requirements MUST comply with the MECE principle, demonstrating high coherence and cohesion.
@@ -10,7 +32,7 @@
         - **Prohibition of Punctuation-Forced Clauses**：The linking of grammatically disjointed phrases or fragments into a single sentence using punctuation (for example, semicolons, em-dashes, or commas) is strictly prohibited. A short example marker (`e.g.`, `i.e.`, `such as`, or `for example`) inside one requirement is not a punctuation-forced clause.
         - **Prohibition of Event Welding**：Event welding is the attachment of a second independent event to a sentence by a coordinated finite verb, by a participial adjunct, by a `while` adjunct, or by punctuation. Event welding is prohibited. Coordinating a second finite verb onto the same subject in one sentence is prohibited. A sentence which `renders`, `provisions`, and `deploys` before one period is prohibited. A participial adjunct which names a second event is prohibited. The form `expanding the destination allow list` after a completed clause is prohibited. A `while` adjunct which names a second event is prohibited. The forms `while registering` and `while enforcing` are prohibited.
         - **Prohibition of Colloquialisms**：The register MUST be a formal written technical documentation register. Dialogue-like or colloquial expressions are prohibited. Tutorial narration of behavior which the source code already shows is prohibited. Theory budget follows `(a)`. Comment content follows § 304.
-    - **Normative Semantic Constraints (RFC 2119 Keywords)**：The semantic meaning of requirement keywords in all documentation and comments MUST comply with the definitions in RFC 2119.
+    - **Normative Semantic Constraints (RFC 2119 Keywords)**：The semantic meaning of requirement keywords in normative documentation and criteria specifications MUST comply with the definitions in RFC 2119. Non-normative text, comments, and commit messages MUST NOT force RFC 2119 keywords.
         - `MUST` indicates a mandatory requirement.
         - `MUST NOT` indicates an absolute prohibition.
         - `SHOULD NOT` indicates a strong recommendation against an action unless overridden by unavoidable physical constraints.

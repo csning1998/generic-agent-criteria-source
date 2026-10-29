@@ -39,7 +39,7 @@ The matching scenario file and files listed under `load:` MUST be opened. Preloa
 - Dialogue MUST follow § 301.
 - Technical documentation MUST state the current constraint, the chosen path, and the associated cost.
 - Theoretical explanations MUST reside in a narrative file or runbook.
-- Comments MUST NOT be written unless non-obvious rationale or trade-offs are absent from code.
+- Comments MUST NOT be written unless documenting non-obvious constraints or design trade-offs.
 - Writing explanations of what source code already demonstrates is prohibited.
 - Comments MUST have an upper bound of three lines and one claim.
 - Identifier names MUST use a leading verb rather than preposition suffixes (`xFor`, `xOf`, `xFrom`).

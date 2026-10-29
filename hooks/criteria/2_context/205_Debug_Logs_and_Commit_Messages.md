@@ -9,3 +9,8 @@
     - An association unsupported by the extracted log evidence MUST NOT occur.
     - A proposed correction MUST correspond completely to the identified concrete error.
     - The dialogue-register analog of this evidentiary requirement is stated in § 301(c)(3).
+- **(b) External Service and HTTP Probing**：
+    - Diagnosing connectivity, remote endpoints, or external API failures MUST use a read-only network probe.
+    - Examples of an acceptable read-only network probe include `curl -I` and non-mutating HTTP requests.
+    - The system MUST extract concrete HTTP status codes and response headers before concluding fault origin.
+    - Stating external service failures or authorization defects without verified HTTP status code evidence is strictly prohibited.

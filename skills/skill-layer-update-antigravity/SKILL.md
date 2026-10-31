@@ -22,16 +22,16 @@ The owner asked to update Antigravity IDE, Agent Manager, or both.
 
 - Required: the product names from the owner. Bare 「Antigravity」 means both.
 
-Read `~/.grok/skills/modules/shared/write-gate.md`.
+Read `modules/shared/write-gate.md`.
 
 ## Process
 
-1. Send `{"op":"probe"}` to `~/.grok/skills/skill-module-update-antigravity/SKILL.md`.
+1. Send `{"op":"probe"}` to `skills/skill-module-update-antigravity/SKILL.md`.
 2. Fill replace JSON from this probe. Use `ideVersion` in `product.json` as the IDE version. Do not use `antigravity-ide --version`.
 3. Skip a product whose live version matches the official version.
 4. Official hosts only: `storage.googleapis.com`, `dl.google.com`, `edgedl.me.gvt1.com`.
 5. If `/opt` needs sudo and sudo is blocked, set `hub_root` to `~/.local/share/antigravity/Antigravity-x64`.
-6. Call the module with `op` `replace`. Then restore desktop icons, keep existing symlink paths, and match previous `chrome-sandbox` mode.
+6. Call the module with `op` `replace` via `scripts/replace.py`. Then restore desktop icons (copying `code.png` to `antigravity.png` for IDE, extracting icon from `app.asar` for Hub), keep existing symlink paths, and match previous `chrome-sandbox` mode (`4755` for IDE, `755` for Hub).
 
 Typical IDE root is `~/.local/share/antigravity-ide`. Typical hub roots are `~/.local/share/antigravity/Antigravity-x64` or `/opt/antigravity/Antigravity-x64`.
 

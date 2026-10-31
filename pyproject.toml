@@ -71,4 +71,5 @@ extraPaths = [
   "hooks/adapters/claude",
   "skills/skill-module-gitlab-mr-labels/scripts",
   "skills/skill-layer-update-antigravity/scripts",
+  "skills/skill-module-update-antigravity/scripts",
 ]

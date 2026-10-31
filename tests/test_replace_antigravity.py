@@ -40,7 +40,7 @@ def test_validate_url_host_case_insensitivity() -> None:
 
 def test_validate_url_host_rejects_non_http_schemes() -> None:
     """File and non-http schemes raise ValueError."""
-    with pytest.raises(ValueError, match="Scheme must be http or https"):
+    with pytest.raises(ValueError, match="Scheme must be https"):
         replace.validate_url_host("file:///tmp/payload.tar.gz")
 
 

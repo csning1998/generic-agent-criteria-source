@@ -58,8 +58,8 @@ def load_payload(raw: str | None) -> dict:
 def validate_url_host(url: str) -> None:
     """Ensure downloaded URL host is within official allowed hosts."""
     parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise ValueError(f"Scheme must be http or https, got {parsed.scheme}")
+    if parsed.scheme != "https":
+        raise ValueError(f"Scheme must be https, got {parsed.scheme}")
     hostname = (parsed.hostname or "").lower()
     if hostname not in OFFICIAL_HOSTS:
         raise ValueError(
@@ -167,14 +167,14 @@ def stop_main_pid(process_pattern: str) -> None:
 
     deadline = time.time() + 5
     while time.time() < deadline:
-        running = False
+        has_running_processes = False
         for root_pid, _, _ in roots:
             try:
                 os.kill(root_pid, 0)
-                running = True
+                has_running_processes = True
             except ProcessLookupError:
                 pass
-        if not running:
+        if not has_running_processes:
             break
         time.sleep(0.5)
 
@@ -216,6 +216,13 @@ def extract_asar_icon(asar_path: Path, dest: Path) -> bool:
         return False
 
 
+def is_contained_regular(path: Path, root: Path) -> bool:
+    """Return True when path is not a symlink and resolves inside root."""
+    if path.is_symlink():
+        return False
+    return path.resolve().is_relative_to(root.resolve())
+
+
 def stage_product(
     url: str, install_root: Path, sha256: str | None = None
 ) -> Path:
@@ -230,19 +237,23 @@ def stage_product(
     extract_dir = staging_dir / "tree"
     extract_dir.mkdir(parents=True, exist_ok=True)
 
-    download_archive(url, tar_path)
-    if sha256:
-        verify_sha256(tar_path, sha256)
-    subprocess.check_call(
-        [
-            "tar",
-            "-xzf",
-            str(tar_path),
-            "-C",
-            str(extract_dir),
-            "--strip-components=1",
-        ]
-    )
+    try:
+        download_archive(url, tar_path)
+        if sha256:
+            verify_sha256(tar_path, sha256)
+        subprocess.check_call(
+            [
+                "tar",
+                "-xzf",
+                str(tar_path),
+                "-C",
+                str(extract_dir),
+                "--strip-components=1",
+            ]
+        )
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
     return staging_dir
 
 
@@ -288,11 +299,17 @@ def commit_product(
         antigravity_icon = (
             install_root / "resources/app/resources/linux/antigravity.png"
         )
-        if code_icon.is_file() and not antigravity_icon.exists():
+        if (
+            code_icon.is_file()
+            and is_contained_regular(code_icon, install_root)
+            and not antigravity_icon.is_symlink()
+            and not antigravity_icon.exists()
+            and is_contained_regular(antigravity_icon, install_root)
+        ):
             shutil.copy2(code_icon, antigravity_icon)
 
         sandbox = install_root / "chrome-sandbox"
-        if sandbox.is_file() and not sandbox.is_symlink():
+        if sandbox.is_file() and is_contained_regular(sandbox, install_root):
             try:
                 os.chmod(sandbox, 0o4755)
             except PermissionError:
@@ -301,12 +318,12 @@ def commit_product(
         if extract_hub_icon:
             asar = install_root / "resources/app.asar"
             icon = install_root / "resources/icon.png"
-            if asar.is_file():
+            if asar.is_file() and is_contained_regular(icon, install_root):
                 icon.parent.mkdir(parents=True, exist_ok=True)
                 extract_asar_icon(asar, icon)
 
         sandbox = install_root / "chrome-sandbox"
-        if sandbox.is_file() and not sandbox.is_symlink():
+        if sandbox.is_file() and is_contained_regular(sandbox, install_root):
             os.chmod(sandbox, 0o755)
 
     return backup_path
@@ -376,24 +393,24 @@ def main() -> int:
         return 1
 
     backups = []
-    staged = []
+    staged_jobs = []
 
     try:
         jobs = build_jobs(payload)
         for job in jobs:
-            staged.append(
+            staged_jobs.append(
                 (job, stage_product(job["url"], job["root"], job["sha256"]))
             )
-        for job, staging_dir in staged:
-            bak = commit_product(
+        for job, staging_dir in staged_jobs:
+            backup_path = commit_product(
                 job["product"],
                 staging_dir,
                 job["root"],
                 job["old_version"],
                 job["extract_hub_icon"],
             )
-            if bak:
-                backups.append(bak)
+            if backup_path:
+                backups.append(backup_path)
 
         result = {
             "ok": True,
@@ -406,7 +423,7 @@ def main() -> int:
         sys.stdout.write("\n")
         return 0
     except Exception as err:
-        for _, staging_dir in staged:
+        for _, staging_dir in staged_jobs:
             shutil.rmtree(staging_dir, ignore_errors=True)
         result = {
             "ok": False,

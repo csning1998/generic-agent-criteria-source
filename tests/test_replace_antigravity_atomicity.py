@@ -50,7 +50,7 @@ def test_commit_product_fresh_install_move_failure(tmp_path: Path) -> None:
     assert not root.exists()
 
 
-def _payload(**overrides: object) -> dict:
+def _build_payload(**overrides: object) -> dict:
     base: dict = {
         "op": "replace",
         "products": ["ide", "hub"],
@@ -67,7 +67,7 @@ def _payload(**overrides: object) -> dict:
 
 def test_build_jobs_validates_all_products_first() -> None:
     """An invalid second product fails before any job is returned."""
-    payload = _payload(hub_url="https://evil.example.com/hub.tar.gz")
+    payload = _build_payload(hub_url="https://evil.example.com/hub.tar.gz")
     with pytest.raises(ValueError, match="is not in official hosts"):
         replace.build_jobs(payload)
 
@@ -75,11 +75,11 @@ def test_build_jobs_validates_all_products_first() -> None:
 def test_build_jobs_rejects_bad_version_and_root() -> None:
     """Bad version or root in any product aborts job construction."""
     with pytest.raises(ValueError, match="Invalid version string"):
-        replace.build_jobs(_payload(old_hub_version="../x"))
+        replace.build_jobs(_build_payload(old_hub_version="../x"))
     with pytest.raises(ValueError, match="outside allowed"):
-        replace.build_jobs(_payload(ide_root="/etc/ide"))
+        replace.build_jobs(_build_payload(ide_root="/etc/ide"))
     with pytest.raises(ValueError, match="Invalid ide_sha256"):
-        replace.build_jobs(_payload(ide_sha256="zz"))
+        replace.build_jobs(_build_payload(ide_sha256="zz"))
 
 
 def test_main_stage_failure_touches_no_live_root(
@@ -95,7 +95,10 @@ def test_main_stage_failure_touches_no_live_root(
         return Path("/nonexistent-staging")
 
     with (
-        patch("sys.argv", ["replace.py", "--payload", json.dumps(_payload())]),
+        patch(
+            "sys.argv",
+            ["replace.py", "--payload", json.dumps(_build_payload())],
+        ),
         patch("replace.stage_product", side_effect=fake_stage),
         patch("replace.commit_product") as mock_commit,
         patch("shutil.rmtree"),

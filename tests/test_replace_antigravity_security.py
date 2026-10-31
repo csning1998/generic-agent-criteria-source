@@ -60,7 +60,7 @@ def test_validate_install_root_rejects_symlink_escape(tmp_path: Path) -> None:
             replace.validate_install_root(str(link))
 
 
-def _curl_result(*responses: str):
+def _build_curl_mock(*responses: str):
     iterator = iter(responses)
 
     def fake(cmd: list[str], text: bool = True) -> str:
@@ -74,7 +74,7 @@ def _curl_result(*responses: str):
 def test_download_archive_success(tmp_path: Path) -> None:
     """A 200 response completes without further hops."""
     with patch(
-        "subprocess.check_output", side_effect=_curl_result("200 ")
+        "subprocess.check_output", side_effect=_build_curl_mock("200 ")
     ) as mock_out:
         replace.download_archive(
             "https://dl.google.com/a.tar.gz", tmp_path / "a.tar.gz"
@@ -86,7 +86,7 @@ def test_download_archive_rejects_redirect_to_foreign_host(
     tmp_path: Path,
 ) -> None:
     """Redirect to a non-official host is rejected before the next fetch."""
-    responses = _curl_result("302 https://evil.example.com/x.tar.gz")
+    responses = _build_curl_mock("302 https://evil.example.com/x.tar.gz")
     with patch("subprocess.check_output", side_effect=responses) as mock_out:
         with pytest.raises(ValueError, match="is not in official hosts"):
             replace.download_archive(
@@ -97,7 +97,9 @@ def test_download_archive_rejects_redirect_to_foreign_host(
 
 def test_download_archive_follows_official_redirect(tmp_path: Path) -> None:
     """Redirect between official hosts is followed."""
-    responses = _curl_result("302 https://edgedl.me.gvt1.com/b.tar.gz", "200 ")
+    responses = _build_curl_mock(
+        "302 https://edgedl.me.gvt1.com/b.tar.gz", "200 "
+    )
     with patch("subprocess.check_output", side_effect=responses) as mock_out:
         replace.download_archive(
             "https://dl.google.com/a.tar.gz", tmp_path / "a.tar.gz"
@@ -108,7 +110,7 @@ def test_download_archive_follows_official_redirect(tmp_path: Path) -> None:
 def test_download_archive_redirect_loop_is_bounded(tmp_path: Path) -> None:
     """Endless official redirects terminate with RuntimeError."""
     loop = "302 https://dl.google.com/a.tar.gz"
-    responses = _curl_result(*([loop] * (replace.MAX_REDIRECTS + 2)))
+    responses = _build_curl_mock(*([loop] * (replace.MAX_REDIRECTS + 2)))
     with patch("subprocess.check_output", side_effect=responses):
         with pytest.raises(RuntimeError, match="Too many redirects"):
             replace.download_archive(
@@ -118,7 +120,7 @@ def test_download_archive_redirect_loop_is_bounded(tmp_path: Path) -> None:
 
 def test_download_archive_http_error(tmp_path: Path) -> None:
     """Non-2xx non-redirect status raises RuntimeError."""
-    with patch("subprocess.check_output", side_effect=_curl_result("404 ")):
+    with patch("subprocess.check_output", side_effect=_build_curl_mock("404 ")):
         with pytest.raises(RuntimeError, match="HTTP 404"):
             replace.download_archive(
                 "https://dl.google.com/a.tar.gz", tmp_path / "a.tar.gz"

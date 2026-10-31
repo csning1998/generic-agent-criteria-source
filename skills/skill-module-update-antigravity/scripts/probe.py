@@ -45,7 +45,7 @@ def fetch(url: str) -> bytes:
     return payload
 
 
-def version_from_url(url: str) -> str:
+def parse_version_from_url(url: str) -> str:
     """Parse a version token from a known official tarball URL."""
     for pattern in (
         r"/antigravity-hub/([^/]+)/",
@@ -77,8 +77,8 @@ def resolve_official() -> dict[str, dict[str, str]]:
             "the download page"
         )
     return {
-        "hub": {"version": version_from_url(hub_url), "url": hub_url},
-        "ide": {"version": version_from_url(ide_url), "url": ide_url},
+        "hub": {"version": parse_version_from_url(hub_url), "url": hub_url},
+        "ide": {"version": parse_version_from_url(ide_url), "url": ide_url},
     }
 
 
@@ -134,7 +134,7 @@ def read_hub_version(root: Path) -> str | None:
     return None
 
 
-def existing_roots(candidates: list[Path], marker: str) -> list[Path]:
+def find_existing_roots(candidates: list[Path], marker: str) -> list[Path]:
     """Return unique existing install roots that contain marker."""
     found: list[Path] = []
     seen: set[Path] = set()
@@ -165,12 +165,12 @@ def main() -> int:
 
     official = resolve_official()
     ide_installs = []
-    for root in existing_roots(IDE_CANDIDATES, "antigravity-ide"):
+    for root in find_existing_roots(IDE_CANDIDATES, "antigravity-ide"):
         ide_installs.append(
             {"path": str(root), "version": read_ide_version(root)}
         )
     hub_installs = []
-    for root in existing_roots(HUB_CANDIDATES, "antigravity"):
+    for root in find_existing_roots(HUB_CANDIDATES, "antigravity"):
         hub_installs.append(
             {"path": str(root), "version": read_hub_version(root)}
         )

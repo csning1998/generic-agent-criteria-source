@@ -1,20 +1,14 @@
 
 locals {
-  state = {
-    group_federation_anthropic = data.terraform_remote_state.group_federation_anthropic.outputs
-    group_federation_gcp       = data.terraform_remote_state.group_federation_gcp.outputs
-    group_federation_azure     = data.terraform_remote_state.group_federation_azure.outputs
+  ai_provider = {
+    for name, secret in data.vault_generic_secret.registry_platform_ai_provider : name => nonsensitive(secret.data)
   }
-}
-
-locals {
-  _state_base_parent_group_governance = "https://gitlab.com/api/v4/projects/86417732/terraform/state"
 }
 
 ephemeral "vault_kv_secret_v2" "state_backend" {
   provider = vault.bastion
   mount    = "secret"
-  name     = "parent-group-governance/terraform/state-backend"
+  name     = "${var.gitlab_token_owner_code}/terraform/state-backend"
 }
 
 ephemeral "vault_kv_secret_v2" "github_publication" {
@@ -29,23 +23,9 @@ ephemeral "vault_kv_secret_v2" "anthropic_console" {
   name     = "parent-group-governance/ai-provider-console/anthropic"
 }
 
-data "terraform_remote_state" "group_federation_anthropic" {
-  backend = "http"
-  config = {
-    address = "${local._state_base_parent_group_governance}/group-federation-anthropic"
-  }
-}
-
-data "terraform_remote_state" "group_federation_gcp" {
-  backend = "http"
-  config = {
-    address = "${local._state_base_parent_group_governance}/group-federation-gcp"
-  }
-}
-
-data "terraform_remote_state" "group_federation_azure" {
-  backend = "http"
-  config = {
-    address = "${local._state_base_parent_group_governance}/group-federation-azure"
-  }
+# parent-group-governance publishes the federation identifiers in the registry, in place of its Terraform state.
+data "vault_generic_secret" "registry_platform_ai_provider" {
+  for_each = toset(["anthropic", "google-cloud", "azure"])
+  provider = vault.bastion
+  path     = "registry/platform/ai-provider/${each.key}"
 }

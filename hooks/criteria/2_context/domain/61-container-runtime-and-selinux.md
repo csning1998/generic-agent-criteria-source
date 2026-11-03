@@ -44,7 +44,7 @@ A rootless Quadlet file MUST live on the systemd search path of that user and MU
 
 2. **Boolean Bypass Prohibited**. A global boolean such as `setsebool -P container_manage_cgroup on` MUST NOT be the fix for a single case, unless the meaning of that boolean matches the need and the change is recorded.
 
-3. **Volume Labels**. A host path mounted into a container MUST set a label option. `:z` means shared across containers. `:Z` means private to one container. `:Z` on a shared path removes access from the other containers. Either option on a system directory relabels a wide tree and is high risk. Those options MUST NOT be applied to `/`, `/usr`, `/etc`, or `/var`.
+3. **Volume Labels**. A container mount MUST NOT carry the relabel option `:z`, `:Z`, or `relabel=`. A relabel walks the whole source tree and replaces the label of every file below the source path. A relabel of a parent directory therefore removes access from every running container which mounts a path below that directory. A host path which a container mounts MUST receive its label from a file context rule (`semanage fcontext` and `restorecon`).
 
 4. **Custom Policy**. A custom policy MUST be a policy module (`.te` / `.fc`), MUST be in version control, and MUST be installed by Ansible. Raw `audit2allow` output MUST NOT be applied without review.
 

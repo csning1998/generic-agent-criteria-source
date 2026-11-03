@@ -708,6 +708,49 @@ def test_intercept_bash_hard_denies_rm_rf(capsys) -> None:
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        'podman run --rm -v "$PWD:/workdir:Z" -w /workdir image:1 mdl .',
+        "podman run -v /srv/a:/a:z image:1",
+        "podman run -v /srv/a:/a:ro,Z image:1",
+        "podman run -v /srv/a:/a:Z,ro image:1",
+        "docker run --volume=/srv/a:/a:z image:1",
+        "docker run --volume /srv/a:/a:rw,z image:1",
+        "podman run --mount type=bind,src=/a,dst=/a,relabel=private img:1",
+        "podman run --mount type=bind,source=/a,target=/a,relabel=shared i:1",
+    ],
+)
+def test_intercept_bash_hard_denies_selinux_relabel_mount(
+    command: str, capsys
+) -> None:
+    """A volume relabel option is denied whatever the scenario or phrase."""
+    payload = {"session_id": "s1", "tool_input": {"command": command}}
+    out = _run_intercept_bash(payload, [], capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "relabel" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "podman run -v /srv/a:/a:ro image:1",
+        "podman run -v data:/var/lib/data image:1",
+        "podman run --mount type=bind,src=/srv/a,dst=/a,ro image:1",
+        "ls -Zd /srv/a",
+        "grep -v ':Z' notes.txt",
+        "podman unshare chcon -R -t container_file_t -l s0:c1,c2 /srv/a",
+    ],
+)
+def test_intercept_bash_allows_mount_without_relabel(
+    command: str, capsys
+) -> None:
+    """A mount without a relabel option and SELinux inspection commands pass."""
+    payload = {"session_id": "s1", "tool_input": {"command": command}}
+    out = _run_intercept_bash(payload, [], capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
 def test_intercept_bash_allows_readonly_git_without_exec_phrase(capsys) -> None:
     """A readonly_command_glob entry needs no exec phrase."""
     payload = {"session_id": "s1", "tool_input": {"command": "git status"}}

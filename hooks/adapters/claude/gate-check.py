@@ -12,6 +12,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -33,6 +34,13 @@ CRITERIA_DIR = Path.home() / ".agents" / "criteria"
 STATE_DIR: Path | None = None
 
 HARD_DENY_COMMAND_SUBSTRINGS = ("git push --force", "git push -f", "rm -rf")
+# A relabel rewrites the label of the whole source tree and thereby revokes
+# access from every container which mounts a path below the source (Sub-doc 61).
+VOLUME_OPTIONS_PATTERN = re.compile(
+    r"""(?:^|\s)(?:-v|--volume)(?:=|\s+)["']?[^\s"':]*:[^\s"':]+:([^\s"']+)"""
+)
+MOUNT_RELABEL_PATTERN = re.compile(r"(?:^|\s)--mount(?:=|\s+)\S*\brelabel=")
+RELABEL_VOLUME_OPTIONS = frozenset({"z", "Z"})
 NOTEBOOK_GLOBS = ("*.ipynb",)
 EXEC_PHRASES = (
     "Approve",
@@ -322,12 +330,27 @@ def require_exec_phrase(payload: dict, reason: str) -> None:
     )
 
 
+def has_selinux_relabel_mount(command: str) -> bool:
+    """Report whether a container mount in command requests a relabel."""
+    if MOUNT_RELABEL_PATTERN.search(command):
+        return True
+    return any(
+        RELABEL_VOLUME_OPTIONS.intersection(match.group(1).split(","))
+        for match in VOLUME_OPTIONS_PATTERN.finditer(command)
+    )
+
+
 def intercept_bash(payload: dict, scenarios: list[dict]) -> None:
     """Gate a Bash tool call against the hard-deny list and command_glob."""
     session_id = payload.get("session_id", "unknown")
     command = payload.get("tool_input", {}).get("command", "")
     if any(bad in command for bad in HARD_DENY_COMMAND_SUBSTRINGS):
         deny("external-write.md: git push --force and rm -rf must never run.")
+    if has_selinux_relabel_mount(command):
+        deny(
+            "61-container-runtime-and-selinux.md: the SELinux relabel options "
+            ":z, :Z, and relabel= are globally prohibited on container mounts."
+        )
 
     ext_write = next(
         (m for m in scenarios if m.get("id") == "external-write"), None

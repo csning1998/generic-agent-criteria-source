@@ -121,6 +121,45 @@ def test_intercept_edit_write_allows_clean_edit(tmp_path, capsys) -> None:
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+HOOK_SCRIPT_WITH_BIND_MOUNT = (
+    "#!/bin/sh\n"
+    'podman run --rm -v "${REPO_ROOT}/.git:/repo/.git:ro" -w /repo \\\n'
+    "    docker.io/zricethezav/gitleaks:v8.30.1 protect --staged\n"
+)
+
+
+@pytest.mark.parametrize("field", ["content", "new_string"])
+def test_intercept_edit_write_denies_bind_mount_script_in_temp_dir(
+    field: str, tmp_path, capsys
+) -> None:
+    """A script written below the temp directory may not carry a bind mount."""
+    payload = {
+        "session_id": "s1",
+        "tool_input": {
+            "file_path": str(tmp_path / "hooks" / "pre-commit"),
+            field: HOOK_SCRIPT_WITH_BIND_MOUNT,
+        },
+    }
+    out = _run_intercept_edit_write(payload, capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "bind mount" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_intercept_edit_write_allows_bind_mount_outside_temp_dir(
+    capsys,
+) -> None:
+    """A repository file such as a CI definition keeps its own mount lines."""
+    payload = {
+        "session_id": "s1",
+        "tool_input": {
+            "file_path": str(Path.home() / "repo" / ".githooks" / "pre-commit"),
+            "content": HOOK_SCRIPT_WITH_BIND_MOUNT,
+        },
+    }
+    out = _run_intercept_edit_write(payload, capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
 # post_write_review.main: malformed stdin and state hardening
 
 
@@ -734,21 +773,79 @@ def test_intercept_bash_hard_denies_selinux_relabel_mount(
 @pytest.mark.parametrize(
     "command",
     [
-        "podman run -v /srv/a:/a:ro image:1",
-        "podman run -v data:/var/lib/data image:1",
+        "podman run --rm -v /srv/a:/a:ro image:1",
+        'podman run --rm -v "$PWD/README.md:/workdir/README.md:ro" image:1',
+        'podman run --rm -v "${REPO_ROOT}/.git:/repo/.git:ro" image:1',
+        "podman create -v /srv/a:/a image:1",
+        "docker run --volume=./src:/src image:1",
+        "docker run --volume ~/data:/data image:1",
         "podman run --mount type=bind,src=/srv/a,dst=/a,ro image:1",
+        "podman run --mount=type=bind,source=/a,target=/a image:1",
+    ],
+)
+def test_intercept_bash_hard_denies_host_bind_mount(
+    command: str, capsys
+) -> None:
+    """A host path mounted into a container is denied whatever the phrase."""
+    payload = {"session_id": "s1", "tool_input": {"command": command}}
+    out = _run_intercept_bash(payload, [], capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "bind mount" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -c core.hooksPath=/tmp/hooks commit -m 'ci: x'",
+        "git -c core.hooksPath= commit -m 'ci: x'",
+        "git config core.hooksPath /tmp/hooks",
+        "git commit --no-verify -m 'ci: x'",
+        "git commit -n -m 'ci: x'",
+        "git commit -nm 'ci: x'",
+    ],
+)
+def test_intercept_bash_hard_denies_git_hook_bypass(
+    command: str, capsys
+) -> None:
+    """A swap or a skip of the repository git hooks is denied."""
+    payload = {"session_id": "s1", "tool_input": {"command": command}}
+    out = _run_intercept_bash(payload, [EXTERNAL_WRITE_META], capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "hook" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "podman run -v data:/var/lib/data image:1",
+        "podman run --mount type=volume,src=data,dst=/data image:1",
+        "podman create --name lint image:1",
+        "podman cp README.md lint:/workdir/README.md",
         "ls -Zd /srv/a",
         "grep -v ':Z' notes.txt",
+        "grep -v /srv/a:/a notes.txt",
         "podman unshare chcon -R -t container_file_t -l s0:c1,c2 /srv/a",
     ],
 )
-def test_intercept_bash_allows_mount_without_relabel(
+def test_intercept_bash_allows_commands_without_host_mount(
     command: str, capsys
 ) -> None:
-    """A mount without a relabel option and SELinux inspection commands pass."""
+    """A named volume, a podman cp copy, and inspection commands pass."""
     payload = {"session_id": "s1", "tool_input": {"command": command}}
     out = _run_intercept_bash(payload, [], capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+def test_intercept_bash_allows_git_commit_message_with_dash_n(capsys) -> None:
+    """A commit message which contains -n is not a hook skip."""
+    payload = {
+        "session_id": "s1",
+        "tool_input": {"command": "git commit -m 'docs: explain -n usage'"},
+    }
+    out = _run_intercept_bash(payload, [EXTERNAL_WRITE_META], capsys)
+    assert "hook" not in out["hookSpecificOutput"].get(
+        "permissionDecisionReason", ""
+    )
 
 
 def test_intercept_bash_allows_readonly_git_without_exec_phrase(capsys) -> None:

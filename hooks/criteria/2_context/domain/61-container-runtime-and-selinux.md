@@ -20,7 +20,7 @@ Sections 6 and 8 of `ENGINEERING_PRINCIPLES.md` are prerequisites for this file.
 
 A systemd-managed container MUST be declared as a Quadlet unit file (`.container`, `.pod`, `.network`, `.volume`, or `.image`). `podman generate systemd` is deprecated and is forbidden. Quadlet requires cgroup v2.
 
-Official source URL is https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
+Refer to <https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html> for the official Podman Quadlet unit file reference.
 
 A rootless Quadlet file MUST live on the systemd search path of that user and MUST be started by that user's systemd. A service-section `User=` line MUST NOT be used to imitate rootless.
 
@@ -50,7 +50,9 @@ A rootless Quadlet file MUST live on the systemd search path of that user and MU
 
 5. **SELinux on Kubernetes**. From Kubernetes v1.36, a SELinux volume mount applies the label with `mount -o context=` at mount time and no longer walks the tree. Before the executing Agent writes `seLinuxOptions`, the executing Agent MUST confirm the target cluster version and that mount behavior.
 
-   Official source URL is https://kubernetes.io/blog/2026/04/22/kubernetes-v1-36-release/
+    Refer to <https://kubernetes.io/blog/2026/04/22/kubernetes-v1-36-release/> for the official Kubernetes v1.36 release notes.
+
+6. **Agent Bind Mounts**. A command which the executing Agent runs MUST NOT bind mount a host path into a container through `-v`, `--volume`, or `--mount type=bind`, whether read only or writable. A script which the executing Agent writes for execution on the host, such as a hook copy, MUST NOT declare a host bind mount. A host bind mount produces an access vector cache denial when the host path and the container process carry incompatible SELinux labels. A file which a container requires MUST be transferred into the target container through `podman create` and `podman cp`. `gate-check.py` denies a direct bind mount command and a script below a temporary directory which contains a host bind mount. `gate-check.py` does not inspect a script outside a temporary directory.
 
 ## Section 5. Runtime Privileges
 

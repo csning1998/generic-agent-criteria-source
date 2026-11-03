@@ -13,7 +13,9 @@ import fnmatch
 import json
 import os
 import re
+import shlex
 import sys
+import tempfile
 from pathlib import Path
 from typing import NoReturn
 
@@ -41,6 +43,29 @@ VOLUME_OPTIONS_PATTERN = re.compile(
 )
 MOUNT_RELABEL_PATTERN = re.compile(r"(?:^|\s)--mount(?:=|\s+)\S*\brelabel=")
 RELABEL_VOLUME_OPTIONS = frozenset({"z", "Z"})
+# A bind mount exposes a host label to the container label, which SELinux
+# denies on an MCS mismatch and which tempts a relabel (Sub-doc 61).
+CONTAINER_CLI_PATTERN = re.compile(r"\b(?:podman|docker|nerdctl|buildah)\b")
+VOLUME_SOURCE_PATTERN = re.compile(
+    r"""(?:^|\s)(?:-v|--volume)(?:=|\s+)["']?([^\s"':]+):"""
+)
+BIND_MOUNT_PATTERN = re.compile(
+    r"""(?:^|\s)--mount(?:=|\s+)["']?\S*\btype=bind\b"""
+)
+HOST_PATH_PREFIXES = ("/", ".", "~", "$")
+TEMP_DIRECTORIES = (
+    Path(tempfile.gettempdir()),
+    Path("/tmp"),
+    Path("/var/tmp"),
+)
+HOOKS_PATH_OVERRIDE_PATTERN = re.compile(
+    r"-c\s*core\.hooksPath="
+    r"|GIT_CONFIG_[A-Z0-9_]*=[\"']?core\.hooksPath"
+    r"|\bconfig\b(?:(?!--get)[^\n;&|])*\bcore\.hooksPath\b"
+)
+NO_VERIFY_PATTERN = re.compile(r"\bgit\b[^\n;&|]*\s--no-verify\b")
+SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|"})
+COMMIT_VALUE_FLAGS = frozenset("mFcCt")
 NOTEBOOK_GLOBS = ("*.ipynb",)
 EXEC_PHRASES = (
     "Approve",
@@ -290,6 +315,11 @@ def intercept_edit_write(payload: dict, scenarios: list[dict]) -> None:
             "notebook.md: disk mutation of .ipynb is prohibited in every case; "
             "use Literature Programming in-session instead."
         )
+    written_text = (
+        tool_input.get("content") or tool_input.get("new_string") or ""
+    )
+    if is_temp_path(file_path) and has_host_bind_mount(written_text):
+        emit_host_bind_mount_denial()
     meta = find_most_specific_scenario(scenarios, file_path)
     if meta is None:
         meta = next(
@@ -340,6 +370,73 @@ def has_selinux_relabel_mount(command: str) -> bool:
     )
 
 
+def has_host_bind_mount(text: str) -> bool:
+    """Report whether a container command in text mounts a host path."""
+    if not CONTAINER_CLI_PATTERN.search(text):
+        return False
+    if BIND_MOUNT_PATTERN.search(text):
+        return True
+    return any(
+        source.startswith(HOST_PATH_PREFIXES) or "/" in source
+        for source in VOLUME_SOURCE_PATTERN.findall(text)
+    )
+
+
+def is_temp_path(file_path: str) -> bool:
+    """Report whether file_path lies below a system temp directory."""
+    target = Path(file_path).resolve()
+    return any(
+        target.is_relative_to(directory.resolve())
+        for directory in TEMP_DIRECTORIES
+    )
+
+
+def emit_host_bind_mount_denial() -> NoReturn:
+    """Deny a host bind mount from an agent command or agent-written script."""
+    deny(
+        "61-container-runtime-and-selinux.md: a host bind mount into a "
+        "container is prohibited in agent commands and agent-written scripts. "
+        "Copy files into the container with podman create and podman cp."
+    )
+
+
+def has_commit_no_verify_flag(command: str) -> bool:
+    """Report whether a git commit in command carries the short flag -n."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    in_git = in_commit = skip_value = False
+    for token in tokens:
+        if token in SHELL_SEPARATORS:
+            in_git = in_commit = skip_value = False
+        elif skip_value:
+            skip_value = False
+        elif token == "git":
+            in_git, in_commit = True, False
+        elif in_git and not in_commit and token == "commit":
+            in_commit = True
+        elif in_commit and token == "--":
+            in_commit = False
+        elif in_commit and token.startswith("-") and not token.startswith("--"):
+            for index, flag in enumerate(token[1:]):
+                if flag == "n":
+                    return True
+                if flag in COMMIT_VALUE_FLAGS:
+                    skip_value = index == len(token) - 2
+                    break
+    return False
+
+
+def has_git_hook_bypass(command: str) -> bool:
+    """Report whether command swaps or skips the repository git hooks."""
+    return bool(
+        HOOKS_PATH_OVERRIDE_PATTERN.search(command)
+        or NO_VERIFY_PATTERN.search(command)
+        or has_commit_no_verify_flag(command)
+    )
+
+
 def intercept_bash(payload: dict, scenarios: list[dict]) -> None:
     """Gate a Bash tool call against the hard-deny list and command_glob."""
     session_id = payload.get("session_id", "unknown")
@@ -350,6 +447,13 @@ def intercept_bash(payload: dict, scenarios: list[dict]) -> None:
         deny(
             "61-container-runtime-and-selinux.md: the SELinux relabel options "
             ":z, :Z, and relabel= are globally prohibited on container mounts."
+        )
+    if has_host_bind_mount(command):
+        emit_host_bind_mount_denial()
+    if has_git_hook_bypass(command):
+        deny(
+            "external-write.md: overriding core.hooksPath and skipping git "
+            "hooks with --no-verify or -n are prohibited."
         )
 
     ext_write = next(

@@ -38,19 +38,34 @@ STATE_DIR: Path | None = None
 HARD_DENY_COMMAND_SUBSTRINGS = ("git push --force", "git push -f", "rm -rf")
 # A relabel rewrites the label of the whole source tree and thereby revokes
 # access from every container which mounts a path below the source (Sub-doc 61).
+VOLUME_FLAG = r"""(?:^|\s)(?:-v(?:=|\s+)?|--volume(?:=|\s+))["']?"""
 VOLUME_OPTIONS_PATTERN = re.compile(
-    r"""(?:^|\s)(?:-v|--volume)(?:=|\s+)["']?[^\s"':]*:[^\s"':]+:([^\s"']+)"""
+    VOLUME_FLAG + r"""[^\s"':]*:[^\s"':]+:([^\s"']+)"""
 )
 MOUNT_RELABEL_PATTERN = re.compile(r"(?:^|\s)--mount(?:=|\s+)\S*\brelabel=")
 RELABEL_VOLUME_OPTIONS = frozenset({"z", "Z"})
 # A bind mount exposes a host label to the container label, which SELinux
 # denies on an MCS mismatch and which tempts a relabel (Sub-doc 61).
 CONTAINER_CLI_PATTERN = re.compile(r"\b(?:podman|docker|nerdctl|buildah)\b")
-VOLUME_SOURCE_PATTERN = re.compile(
-    r"""(?:^|\s)(?:-v|--volume)(?:=|\s+)["']?([^\s"':]+):"""
-)
+VOLUME_SOURCE_PATTERN = re.compile(VOLUME_FLAG + r"""([^\s"':]+):""")
 BIND_MOUNT_PATTERN = re.compile(
     r"""(?:^|\s)--mount(?:=|\s+)["']?\S*\btype=bind\b"""
+)
+# kube play and compose read mounts from a file which the gate cannot inspect.
+DECLARED_MOUNT_PATTERN = re.compile(
+    r"\b(?:podman|docker)\s+(?:kube\s+play|play\s+kube|compose)\b"
+    r"|\b(?:podman|docker)-compose\b"
+)
+# A label write, a policy change, or label=disable alters SELinux state on
+# the owner host, which only the owner decides (Sub-doc 61).
+SELINUX_WRITE_PATTERN = re.compile(
+    r"(?:^\s*|[;&|(]\s*|\b(?:sudo|doas|unshare|exec|xargs|env|nohup)\s+"
+    r"(?:-\S+\s+)*)(?:\S*/)?"
+    r"(?:chcon|restorecon|setfiles|chcat|semanage|setsebool|semodule)\b",
+    re.MULTILINE,
+)
+LABEL_DISABLE_PATTERN = re.compile(
+    r"""--security-opt(?:=|\s+)["']?label[=:]disable\b"""
 )
 HOST_PATH_PREFIXES = ("/", ".", "~", "$")
 TEMP_DIRECTORIES = (
@@ -58,12 +73,15 @@ TEMP_DIRECTORIES = (
     Path("/tmp"),
     Path("/var/tmp"),
 )
+# Git treats config keys as case-insensitive, and every spelling counts.
 HOOKS_PATH_OVERRIDE_PATTERN = re.compile(
     r"-c\s*core\.hooksPath="
-    r"|GIT_CONFIG_[A-Z0-9_]*=[\"']?core\.hooksPath"
-    r"|\bconfig\b(?:(?!--get)[^\n;&|])*\bcore\.hooksPath\b"
+    r"|GIT_CONFIG_[A-Z0-9_]*=[^\n]*core\.hooksPath"
+    r"|\bconfig\b(?:(?!--get)[^\n;&|])*\bcore\.hooksPath\b",
+    re.IGNORECASE,
 )
 NO_VERIFY_PATTERN = re.compile(r"\bgit\b[^\n;&|]*\s--no-verify\b")
+COMMIT_TREE_PATTERN = re.compile(r"\bgit\b[^\n;&|]*\bcommit-tree\b")
 SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|"})
 COMMIT_VALUE_FLAGS = frozenset("mFcCt")
 NOTEBOOK_GLOBS = ("*.ipynb",)
@@ -315,11 +333,10 @@ def intercept_edit_write(payload: dict, scenarios: list[dict]) -> None:
             "notebook.md: disk mutation of .ipynb is prohibited in every case; "
             "use Literature Programming in-session instead."
         )
-    written_text = (
-        tool_input.get("content") or tool_input.get("new_string") or ""
-    )
-    if is_temp_path(file_path) and has_host_bind_mount(written_text):
-        emit_host_bind_mount_denial()
+    if is_temp_path(file_path):
+        enforce_shell_bans(
+            tool_input.get("content") or tool_input.get("new_string") or ""
+        )
     meta = find_most_specific_scenario(scenarios, file_path)
     if meta is None:
         meta = next(
@@ -327,7 +344,6 @@ def intercept_edit_write(payload: dict, scenarios: list[dict]) -> None:
         )
     if meta is None:
         allow()
-        return
     enforce_scenario_context_injection(session_id, meta)
 
 
@@ -374,7 +390,7 @@ def has_host_bind_mount(text: str) -> bool:
     """Report whether a container command in text mounts a host path."""
     if not CONTAINER_CLI_PATTERN.search(text):
         return False
-    if BIND_MOUNT_PATTERN.search(text):
+    if BIND_MOUNT_PATTERN.search(text) or DECLARED_MOUNT_PATTERN.search(text):
         return True
     return any(
         source.startswith(HOST_PATH_PREFIXES) or "/" in source
@@ -395,17 +411,32 @@ def emit_host_bind_mount_denial() -> NoReturn:
     """Deny a host bind mount from an agent command or agent-written script."""
     deny(
         "61-container-runtime-and-selinux.md: a host bind mount into a "
-        "container is prohibited in agent commands and agent-written scripts. "
+        "container, including a mount declared through kube play or compose, "
+        "is prohibited in agent commands and agent-written scripts. "
         "Copy files into the container with podman create and podman cp."
+    )
+
+
+def has_selinux_state_write(text: str) -> bool:
+    """Report whether text writes a label, alters policy, or disables labels."""
+    return bool(
+        SELINUX_WRITE_PATTERN.search(text) or LABEL_DISABLE_PATTERN.search(text)
     )
 
 
 def has_commit_no_verify_flag(command: str) -> bool:
     """Report whether a git commit in command carries the short flag -n."""
+    return any(
+        has_commit_no_verify_flag_in_line(line) for line in command.splitlines()
+    )
+
+
+def has_commit_no_verify_flag_in_line(line: str) -> bool:
+    """Report whether a git commit in one shell line carries the flag -n."""
     try:
-        tokens = shlex.split(command)
+        tokens = shlex.split(line)
     except ValueError:
-        tokens = command.split()
+        tokens = line.split()
     in_git = in_commit = skip_value = False
     for token in tokens:
         if token in SHELL_SEPARATORS:
@@ -433,28 +464,42 @@ def has_git_hook_bypass(command: str) -> bool:
     return bool(
         HOOKS_PATH_OVERRIDE_PATTERN.search(command)
         or NO_VERIFY_PATTERN.search(command)
+        or COMMIT_TREE_PATTERN.search(command)
         or has_commit_no_verify_flag(command)
     )
+
+
+def enforce_shell_bans(text: str) -> None:
+    """Deny shell text, a command or a temp script, which breaks a hard ban."""
+    if any(bad in text for bad in HARD_DENY_COMMAND_SUBSTRINGS):
+        deny("external-write.md: git push --force and rm -rf must never run.")
+    if has_selinux_relabel_mount(text):
+        deny(
+            "61-container-runtime-and-selinux.md: the SELinux relabel options "
+            ":z, :Z, and relabel= are globally prohibited on container mounts."
+        )
+    if has_host_bind_mount(text):
+        emit_host_bind_mount_denial()
+    if has_selinux_state_write(text):
+        deny(
+            "61-container-runtime-and-selinux.md: SELinux label writes, "
+            "policy changes, and label=disable are prohibited in agent "
+            "commands and agent-written scripts. Report the needed label "
+            "to the owner."
+        )
+    if has_git_hook_bypass(text):
+        deny(
+            "external-write.md: overriding core.hooksPath, skipping git hooks "
+            "with --no-verify or -n, and committing through git commit-tree "
+            "are prohibited."
+        )
 
 
 def intercept_bash(payload: dict, scenarios: list[dict]) -> None:
     """Gate a Bash tool call against the hard-deny list and command_glob."""
     session_id = payload.get("session_id", "unknown")
     command = payload.get("tool_input", {}).get("command", "")
-    if any(bad in command for bad in HARD_DENY_COMMAND_SUBSTRINGS):
-        deny("external-write.md: git push --force and rm -rf must never run.")
-    if has_selinux_relabel_mount(command):
-        deny(
-            "61-container-runtime-and-selinux.md: the SELinux relabel options "
-            ":z, :Z, and relabel= are globally prohibited on container mounts."
-        )
-    if has_host_bind_mount(command):
-        emit_host_bind_mount_denial()
-    if has_git_hook_bypass(command):
-        deny(
-            "external-write.md: overriding core.hooksPath and skipping git "
-            "hooks with --no-verify or -n are prohibited."
-        )
+    enforce_shell_bans(command)
 
     ext_write = next(
         (m for m in scenarios if m.get("id") == "external-write"), None
@@ -469,7 +514,6 @@ def intercept_bash(payload: dict, scenarios: list[dict]) -> None:
             p in command for p in ext_write.get("readonly_command_glob", [])
         ) and not any(p in command for p in ext_write.get("command_glob", [])):
             allow()
-            return
         matched_pattern = next(
             (p for p in ext_write.get("command_glob", []) if p in command),
             "this git/glab/gh command (not on the read-only allowlist)",
@@ -481,7 +525,6 @@ def intercept_bash(payload: dict, scenarios: list[dict]) -> None:
     meta = find_matching_command_scenario(scenarios, command)
     if meta is None:
         allow()
-        return
     enforce_scenario_context_injection(session_id, meta)
 
 

@@ -145,6 +145,31 @@ def test_intercept_edit_write_denies_bind_mount_script_in_temp_dir(
     assert "bind mount" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
+@pytest.mark.parametrize(
+    ("script", "reason_word"),
+    [
+        ("#!/bin/sh\nchcon -t container_file_t -R .git\n", "SELinux"),
+        ("#!/bin/sh\npodman run -v /srv/a:/a:Z image:1\n", "relabel"),
+        ("#!/bin/sh\ngit -c core.hooksPath=/tmp/h commit -m x\n", "hook"),
+        ("#!/bin/sh\ngit commit --no-verify -m x\n", "hook"),
+    ],
+)
+def test_intercept_edit_write_denies_shell_ban_in_temp_script(
+    script: str, reason_word: str, tmp_path, capsys
+) -> None:
+    """A temp script falls under every shell ban which a command falls under."""
+    payload = {
+        "session_id": "s1",
+        "tool_input": {
+            "file_path": str(tmp_path / "run.sh"),
+            "content": script,
+        },
+    }
+    out = _run_intercept_edit_write(payload, capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert reason_word in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
 def test_intercept_edit_write_allows_bind_mount_outside_temp_dir(
     capsys,
 ) -> None:
@@ -781,6 +806,14 @@ def test_intercept_bash_hard_denies_selinux_relabel_mount(
         "docker run --volume ~/data:/data image:1",
         "podman run --mount type=bind,src=/srv/a,dst=/a,ro image:1",
         "podman run --mount=type=bind,source=/a,target=/a image:1",
+        "podman run -v/srv/a:/a image:1",
+        "podman run -v=/srv/a:/a image:1",
+        "podman kube play pod.yaml",
+        "podman play kube pod.yaml",
+        "podman compose up -d",
+        "docker compose run app",
+        "docker-compose up",
+        "podman-compose up",
     ],
 )
 def test_intercept_bash_hard_denies_host_bind_mount(
@@ -802,6 +835,11 @@ def test_intercept_bash_hard_denies_host_bind_mount(
         "git commit --no-verify -m 'ci: x'",
         "git commit -n -m 'ci: x'",
         "git commit -nm 'ci: x'",
+        "git -c core.hookspath=/tmp/hooks commit -m 'ci: x'",
+        "git -c CORE.HOOKSPATH=/tmp/hooks commit -m 'ci: x'",
+        "git --config-env=core.hooksPath=HOOKS commit -m 'ci: x'",
+        "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/tmp/h'\" git commit -m x",
+        "git commit-tree HEAD^{tree} -p HEAD -m 'ci: x'",
     ],
 )
 def test_intercept_bash_hard_denies_git_hook_bypass(
@@ -824,7 +862,10 @@ def test_intercept_bash_hard_denies_git_hook_bypass(
         "ls -Zd /srv/a",
         "grep -v ':Z' notes.txt",
         "grep -v /srv/a:/a notes.txt",
-        "podman unshare chcon -R -t container_file_t -l s0:c1,c2 /srv/a",
+        "grep -n chcon .githooks/pre-commit",
+        "matchpathcon /srv/a",
+        "getenforce",
+        "sestatus",
     ],
 )
 def test_intercept_bash_allows_commands_without_host_mount(
@@ -834,6 +875,32 @@ def test_intercept_bash_allows_commands_without_host_mount(
     payload = {"session_id": "s1", "tool_input": {"command": command}}
     out = _run_intercept_bash(payload, [], capsys)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "chcon -t container_file_t -R .git",
+        "podman unshare chcon -R -t container_file_t -l s0:c1,c2 /srv/a",
+        "sudo restorecon -Rv /srv/a",
+        "ls -Z && /usr/bin/chcon -t container_file_t README.md",
+        "semanage fcontext -a -t container_file_t '/srv/a(/.*)?'",
+        "setfiles -v /etc/selinux/targeted/contexts/files/file_contexts /srv",
+        "chcat -- +s0:c1 /srv/a",
+        "setsebool -P container_manage_cgroup on",
+        "semodule -i local.pp",
+        "podman run --security-opt label=disable image:1",
+        "docker run --security-opt=label=disable image:1",
+    ],
+)
+def test_intercept_bash_hard_denies_selinux_label_write(
+    command: str, capsys
+) -> None:
+    """A label write, a policy change, or a label disable is denied."""
+    payload = {"session_id": "s1", "tool_input": {"command": command}}
+    out = _run_intercept_bash(payload, [], capsys)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "SELinux" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_intercept_bash_allows_git_commit_message_with_dash_n(capsys) -> None:

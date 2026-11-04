@@ -37,9 +37,12 @@ proxy_env=$(vault-proxy-env credential-distributor-generic-agent-criteria-source
 sonar_token=$(eval "${proxy_env}" && vault kv get -mount=secret -field="${sonar_token_field}" "${sonar_token_path}")
 unset proxy_env
 
-# The scanner receives copies of the unignored files of the analyzed trees, the git history, and the coverage
-# report through podman cp, since the Python indexer walks the whole base directory. The copies carry the labels
-# of the container, and the root .gitignore drives the SCM exclusion.
+# Ingesting sources via podman cp assigns container SELinux labels without host bind mounts.
+# Exit traps purge stored container state holding SONAR_TOKEN.
+scanner=""
+remove_scanner() { if [ -n "${scanner}" ]; then podman rm -f "${scanner}" >/dev/null 2>&1 || true; scanner=""; fi; }
+trap 'rm -f "$coverage_rc"; remove_scanner' EXIT
+trap 'remove_scanner; exit 130' INT TERM
 scanner=$(SONAR_TOKEN="${sonar_token}" podman create --network host \
     -e SONAR_HOST_URL="${sonar_host_url}" \
     -e SONAR_TOKEN \
@@ -49,11 +52,8 @@ scanner=$(SONAR_TOKEN="${sonar_token}" podman create --network host \
     git ls-files -z --cached --others --exclude-standard -- hooks skills tests terraform .gitignore
     printf '%s\0' .git
     if [ -e coverage.xml ]; then printf '%s\0' coverage.xml; fi
-} | tar -c --null --ignore-failed-read -T - | podman cp - "${scanner}:/usr/src" \
-    || { podman rm -f "${scanner}" >/dev/null; exit 1; }
-scan_status=0
-podman start --attach "${scanner}" || scan_status=$?
-podman rm "${scanner}" >/dev/null
-[ "${scan_status}" -eq 0 ] || exit "${scan_status}"
+} | tar -c --null --ignore-failed-read -T - | podman cp - "${scanner}:/usr/src"
+podman start --attach "${scanner}"
+remove_scanner
 
 echo "sonar: ${sonar_project_key}"

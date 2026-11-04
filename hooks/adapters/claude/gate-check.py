@@ -68,10 +68,12 @@ LABEL_DISABLE_PATTERN = re.compile(
     r"""--security-opt(?:=|\s+)["']?label[=:]disable\b"""
 )
 HOST_PATH_PREFIXES = ("/", ".", "~", "$")
+# The hook compares paths with these roots and never writes there.
+# /tmp stays listed because TMPDIR may sit below /tmp.
 TEMP_DIRECTORIES = (
     Path(tempfile.gettempdir()),
-    Path("/tmp"),
-    Path("/var/tmp"),
+    Path("/tmp"),  # NOSONAR
+    Path("/var/tmp"),  # NOSONAR
 )
 # Git treats config keys as case-insensitive, and every spelling counts.
 HOOKS_PATH_OVERRIDE_PATTERN = re.compile(
@@ -431,14 +433,28 @@ def has_commit_no_verify_flag(command: str) -> bool:
     )
 
 
+def parse_shell_tokens(line: str) -> list[str]:
+    """Split one shell line, with whitespace on unbalanced quotes."""
+    try:
+        return shlex.split(line)
+    except ValueError:
+        return line.split()
+
+
+def inspect_short_flag_cluster(token: str) -> tuple[bool, bool]:
+    """Return whether a flag cluster holds -n and takes the next token."""
+    for index, flag in enumerate(token[1:]):
+        if flag == "n":
+            return True, False
+        if flag in COMMIT_VALUE_FLAGS:
+            return False, index == len(token) - 2
+    return False, False
+
+
 def has_commit_no_verify_flag_in_line(line: str) -> bool:
     """Report whether a git commit in one shell line carries the flag -n."""
-    try:
-        tokens = shlex.split(line)
-    except ValueError:
-        tokens = line.split()
     in_git = in_commit = skip_value = False
-    for token in tokens:
+    for token in parse_shell_tokens(line):
         if token in SHELL_SEPARATORS:
             in_git = in_commit = skip_value = False
         elif skip_value:
@@ -450,12 +466,9 @@ def has_commit_no_verify_flag_in_line(line: str) -> bool:
         elif in_commit and token == "--":
             in_commit = False
         elif in_commit and token.startswith("-") and not token.startswith("--"):
-            for index, flag in enumerate(token[1:]):
-                if flag == "n":
-                    return True
-                if flag in COMMIT_VALUE_FLAGS:
-                    skip_value = index == len(token) - 2
-                    break
+            has_no_verify, skip_value = inspect_short_flag_cluster(token)
+            if has_no_verify:
+                return True
     return False
 
 

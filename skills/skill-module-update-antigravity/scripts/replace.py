@@ -138,55 +138,51 @@ def download_archive(url: str, dest: Path) -> None:
     raise RuntimeError(f"Too many redirects while fetching {url}")
 
 
-def stop_main_pid(process_pattern: str) -> None:
-    """Stop main PID identified from `ps -eo pid,ppid,args`."""
+def find_root_pids(process_pattern: str) -> list[int]:
+    """Return the PIDs of process_pattern whose parent is another program."""
     out = subprocess.check_output(["ps", "-eo", "pid,ppid,args"], text=True)
     candidates = []
     for line in out.splitlines():
         parts = line.strip().split(None, 2)
-        if len(parts) < 3:
+        if len(parts) < 3 or parts[2].split(None, 1)[0] != process_pattern:
             continue
-        pid_str, ppid_str, cmd = parts
-        if cmd.split(None, 1)[0] == process_pattern:
-            try:
-                candidates.append((int(pid_str), int(ppid_str), cmd))
-            except ValueError:
-                continue
-
-    if not candidates:
-        return
-
-    candidate_pids = {p[0] for p in candidates}
-    roots = [p for p in candidates if p[1] not in candidate_pids]
-
-    for root_pid, _, _ in roots:
         try:
-            os.kill(root_pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+            candidates.append((int(parts[0]), int(parts[1])))
+        except ValueError:
+            continue
+    candidate_pids = {pid for pid, _ in candidates}
+    return [pid for pid, ppid in candidates if ppid not in candidate_pids]
 
-    deadline = time.time() + 5
+
+def signal_pid(pid: int, sig: int) -> bool:
+    """Send sig to pid and return False when the process no longer exists."""
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def wait_for_exit(pids: list[int], timeout: float) -> None:
+    """Poll until every PID has exited or timeout seconds have passed."""
+    deadline = time.time() + timeout
     while time.time() < deadline:
-        has_running_processes = False
-        for root_pid, _, _ in roots:
-            try:
-                os.kill(root_pid, 0)
-                has_running_processes = True
-            except ProcessLookupError:
-                pass
-        if not has_running_processes:
-            break
+        if not any(signal_pid(pid, 0) for pid in pids):
+            return
         time.sleep(0.5)
 
-    for root_pid, _, _ in roots:
-        try:
-            os.kill(root_pid, 0)
-        except ProcessLookupError:
-            continue
-        try:
-            os.kill(root_pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+
+def stop_main_pid(process_pattern: str) -> None:
+    """Stop main PID identified from `ps -eo pid,ppid,args`."""
+    roots = find_root_pids(process_pattern)
+    if not roots:
+        return
+    for pid in roots:
+        signal_pid(pid, signal.SIGTERM)
+    wait_for_exit(roots, 5)
+    for pid in roots:
+        if signal_pid(pid, 0):
+            signal_pid(pid, signal.SIGKILL)
 
 
 def extract_asar_icon(asar_path: Path, dest: Path) -> bool:
@@ -266,27 +262,12 @@ def commit_product(
 ) -> str | None:
     """Stop processes, back up the live root, and deploy the staged tree."""
     validate_version(old_version)
-    extract_dir = staging_dir / "tree"
+    executable = "antigravity-ide" if product == "ide" else "antigravity"
+    stop_main_pid(str(install_root / executable))
 
-    if product == "ide":
-        stop_main_pid(str(install_root / "antigravity-ide"))
-    else:
-        stop_main_pid(str(install_root / "antigravity"))
-
-    backup_path = None
-    backup_dir = None
-    if install_root.exists():
-        backup_name = f"{install_root.name}.bak.{old_version}"
-        backup_dir = install_root.parent / backup_name
-        if backup_dir.parent != install_root.parent:
-            raise ValueError(f"Backup path escapes parent: {backup_dir}")
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir)
-        install_root.rename(backup_dir)
-        backup_path = str(backup_dir)
-
+    backup_dir = backup_live_root(install_root, old_version)
     try:
-        shutil.move(str(extract_dir), str(install_root))
+        shutil.move(str(staging_dir / "tree"), str(install_root))
     except Exception:
         shutil.rmtree(install_root, ignore_errors=True)
         if backup_dir is not None:
@@ -295,38 +276,70 @@ def commit_product(
     shutil.rmtree(staging_dir, ignore_errors=True)
 
     if product == "ide":
-        code_icon = install_root / "resources/app/resources/linux/code.png"
-        antigravity_icon = (
-            install_root / "resources/app/resources/linux/antigravity.png"
-        )
-        if (
-            code_icon.is_file()
-            and is_contained_regular(code_icon, install_root)
-            and not antigravity_icon.is_symlink()
-            and not antigravity_icon.exists()
-            and is_contained_regular(antigravity_icon, install_root)
-        ):
-            shutil.copy2(code_icon, antigravity_icon)
-
-        sandbox = install_root / "chrome-sandbox"
-        if sandbox.is_file() and is_contained_regular(sandbox, install_root):
-            try:
-                os.chmod(sandbox, 0o4755)
-            except PermissionError:
-                os.chmod(sandbox, 0o755)
+        finalize_ide(install_root)
     elif product == "hub":
-        if extract_hub_icon:
-            asar = install_root / "resources/app.asar"
-            icon = install_root / "resources/icon.png"
-            if asar.is_file() and is_contained_regular(icon, install_root):
-                icon.parent.mkdir(parents=True, exist_ok=True)
-                extract_asar_icon(asar, icon)
+        finalize_hub(install_root, extract_hub_icon)
+    return str(backup_dir) if backup_dir is not None else None
 
-        sandbox = install_root / "chrome-sandbox"
-        if sandbox.is_file() and is_contained_regular(sandbox, install_root):
-            os.chmod(sandbox, 0o755)
 
-    return backup_path
+def backup_live_root(install_root: Path, old_version: str) -> Path | None:
+    """Rename the live root to its versioned backup, or return None."""
+    if not install_root.exists():
+        return None
+    backup_dir = install_root.parent / f"{install_root.name}.bak.{old_version}"
+    if backup_dir.parent != install_root.parent:
+        raise ValueError(f"Backup path escapes parent: {backup_dir}")
+    if backup_dir.exists():
+        shutil.rmtree(backup_dir)
+    install_root.rename(backup_dir)
+    return backup_dir
+
+
+def contained_sandbox(install_root: Path) -> Path | None:
+    """Return chrome-sandbox when it is a regular file inside install_root."""
+    sandbox = install_root / "chrome-sandbox"
+    if sandbox.is_file() and is_contained_regular(sandbox, install_root):
+        return sandbox
+    return None
+
+
+def finalize_ide(install_root: Path) -> None:
+    """Restore the IDE desktop icon and the setuid chrome-sandbox."""
+    code_icon = install_root / "resources/app/resources/linux/code.png"
+    antigravity_icon = (
+        install_root / "resources/app/resources/linux/antigravity.png"
+    )
+    if (
+        code_icon.is_file()
+        and is_contained_regular(code_icon, install_root)
+        and not antigravity_icon.is_symlink()
+        and not antigravity_icon.exists()
+        and is_contained_regular(antigravity_icon, install_root)
+    ):
+        shutil.copy2(code_icon, antigravity_icon)
+
+    sandbox = contained_sandbox(install_root)
+    if sandbox is None:
+        return
+    # The Electron sandbox requires the 4755 or 755 mode of the old install.
+    try:
+        os.chmod(sandbox, 0o4755)  # NOSONAR
+    except PermissionError:
+        os.chmod(sandbox, 0o755)  # NOSONAR
+
+
+def finalize_hub(install_root: Path, extract_hub_icon: bool) -> None:
+    """Restore the hub desktop icon and the 755 mode of chrome-sandbox."""
+    if extract_hub_icon:
+        asar = install_root / "resources/app.asar"
+        icon = install_root / "resources/icon.png"
+        if asar.is_file() and is_contained_regular(icon, install_root):
+            icon.parent.mkdir(parents=True, exist_ok=True)
+            extract_asar_icon(asar, icon)
+
+    sandbox = contained_sandbox(install_root)
+    if sandbox is not None:
+        os.chmod(sandbox, 0o755)  # NOSONAR
 
 
 def replace_product(

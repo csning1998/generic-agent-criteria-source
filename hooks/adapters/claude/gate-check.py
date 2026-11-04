@@ -59,7 +59,9 @@ DECLARED_MOUNT_PATTERN = re.compile(
 # A label write, a policy change, or label=disable alters SELinux state on
 # the owner host, which only the owner decides (Sub-doc 61).
 SELINUX_WRITE_PATTERN = re.compile(
-    r"(?:^\s*|[;&|(]\s*|\b(?:sudo|doas|unshare|exec|xargs|env|nohup)\s+"
+    r"(?:^\s*|[;&|(`{]\s*|\b(?:then|do|else)\s+"
+    r"|\b(?:ba|z|da)?sh\s+(?:-\S+\s+)*[\"']\s*"
+    r"|\b(?:sudo|doas|unshare|exec|xargs|env|nohup)\s+"
     r"(?:-\S+\s+)*)(?:\S*/)?"
     r"(?:chcon|restorecon|setfiles|chcat|semanage|setsebool|semodule)\b",
     re.MULTILINE,
@@ -77,14 +79,17 @@ TEMP_DIRECTORIES = (
 )
 # Git treats config keys as case-insensitive, and every spelling counts.
 HOOKS_PATH_OVERRIDE_PATTERN = re.compile(
-    r"-c\s*core\.hooksPath="
+    r"-c\s*[\"']?core\.hooksPath="
     r"|GIT_CONFIG_[A-Z0-9_]*=[^\n]*core\.hooksPath"
     r"|\bconfig\b(?:(?!--get)[^\n;&|])*\bcore\.hooksPath\b",
     re.IGNORECASE,
 )
-NO_VERIFY_PATTERN = re.compile(r"\bgit\b[^\n;&|]*\s--no-verify\b")
-COMMIT_TREE_PATTERN = re.compile(r"\bgit\b[^\n;&|]*\bcommit-tree\b")
-SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|"})
+# A quoted separator and an abbreviation of --no-verify still reach git.
+# An extra match is the safe direction for a deny gate.
+NO_VERIFY_PATTERN = re.compile(r"\bgit\b[^\n]*\s--no-ve(?:rify|rif|ri|r)?\b")
+COMMIT_TREE_PATTERN = re.compile(r"\bgit\b[^\n]*\bcommit-tree\b")
+SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+LINE_CONTINUATION = "\\\n"
 COMMIT_VALUE_FLAGS = frozenset("mFcCt")
 NOTEBOOK_GLOBS = ("*.ipynb",)
 EXEC_PHRASES = (
@@ -428,15 +433,19 @@ def has_selinux_state_write(text: str) -> bool:
 
 def has_commit_no_verify_flag(command: str) -> bool:
     """Report whether a git commit in command carries the short flag -n."""
+    joined = command.replace(LINE_CONTINUATION, " ")
     return any(
-        has_line_commit_no_verify_flag(line) for line in command.splitlines()
+        has_line_commit_no_verify_flag(line) for line in joined.splitlines()
     )
 
 
 def parse_shell_tokens(line: str) -> list[str]:
-    """Split one shell line, with whitespace on unbalanced quotes."""
+    """Split one shell line, with operators as tokens of their own."""
     try:
-        return shlex.split(line)
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        return list(lexer)
     except ValueError:
         return line.split()
 
@@ -459,7 +468,7 @@ def has_line_commit_no_verify_flag(line: str) -> bool:
             in_git = in_commit = skip_value = False
         elif skip_value:
             skip_value = False
-        elif token == "git":
+        elif token.rsplit("/", 1)[-1] == "git":
             in_git, in_commit = True, False
         elif in_git and not in_commit and token == "commit":
             in_commit = True
@@ -474,11 +483,12 @@ def has_line_commit_no_verify_flag(line: str) -> bool:
 
 def has_git_hook_bypass(command: str) -> bool:
     """Report whether command swaps or skips the repository git hooks."""
+    joined = command.replace(LINE_CONTINUATION, " ")
     return bool(
-        HOOKS_PATH_OVERRIDE_PATTERN.search(command)
-        or NO_VERIFY_PATTERN.search(command)
-        or COMMIT_TREE_PATTERN.search(command)
-        or has_commit_no_verify_flag(command)
+        HOOKS_PATH_OVERRIDE_PATTERN.search(joined)
+        or NO_VERIFY_PATTERN.search(joined)
+        or COMMIT_TREE_PATTERN.search(joined)
+        or has_commit_no_verify_flag(joined)
     )
 
 

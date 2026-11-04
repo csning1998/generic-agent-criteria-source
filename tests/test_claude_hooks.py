@@ -844,6 +844,16 @@ def test_intercept_bash_hard_denies_host_bind_mount(
         "git --config-env=core.hooksPath=HOOKS commit -m 'ci: x'",
         "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/tmp/h'\" git commit -m x",
         "git commit-tree HEAD^{tree} -p HEAD -m 'ci: x'",
+        'git -c "core.hooksPath=/tmp/hooks" commit -m x',
+        "git -c 'core.hooksPath=/tmp/hooks' commit -m x",
+        'git commit -m "fix; retry" --no-verify',
+        "git commit -m x --no-verif",
+        "git -c x='a|b' commit-tree HEAD^{tree} -m x",
+        "echo hi;git commit -n -m x",
+        "git add .&&git commit -n -m x",
+        "/usr/bin/git commit -n -m x",
+        "git commit \\\n  -n -m x",
+        "git commit -m x \\\n  --no-verify",
     ],
 )
 def test_intercept_bash_hard_denies_git_hook_bypass(
@@ -898,6 +908,11 @@ def test_intercept_bash_allows_commands_without_host_mount(
         "podman run --security-opt label=type:spc_t image:1",
         "docker run --security-opt=label=type:spc_t image:1",
         "podman run --security-opt type:spc_t image:1",
+        'bash -c "chcon -R -t container_file_t /srv/a"',
+        "sh -c 'restorecon -R /srv/a'",
+        "echo `chcon -t container_file_t /srv/a`",
+        "{ chcon -t container_file_t /srv/a; }",
+        "if true; then chcon -t container_file_t /srv/a; fi",
     ],
 )
 def test_intercept_bash_hard_denies_selinux_label_write(

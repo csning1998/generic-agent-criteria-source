@@ -37,15 +37,19 @@ proxy_env=$(vault-proxy-env credential-distributor-generic-agent-criteria-source
 sonar_token=$(eval "${proxy_env}" && vault kv get -mount=secret -field="${sonar_token_field}" "${sonar_token_path}")
 unset proxy_env
 
-# The scanner receives copies of the analyzed trees alone through podman cp, since the Python indexer walks the
-# whole base directory. The copies carry the labels of the container, and the root .gitignore drives the SCM
-# exclusion.
+# The scanner receives copies of the unignored files of the analyzed trees, the git history, and the coverage
+# report through podman cp, since the Python indexer walks the whole base directory. The copies carry the labels
+# of the container, and the root .gitignore drives the SCM exclusion.
 scanner=$(SONAR_TOKEN="${sonar_token}" podman create --network host \
     -e SONAR_HOST_URL="${sonar_host_url}" \
     -e SONAR_TOKEN \
     -e SONAR_SCANNER_OPTS="-Dsonar.projectKey=${sonar_project_key} -Dsonar.projectBaseDir=/usr/src -Dsonar.qualitygate.wait=true -Dsonar.sources=hooks,skills,terraform -Dsonar.exclusions=**/.terraform/**,**/__pycache__/** -Dsonar.tests=tests -Dsonar.test.inclusions=tests/test_*.py -Dsonar.python.coverage.reportPaths=coverage.xml -Dsonar.python.version=3.11,3.12,3.13,3.14" \
     "${scanner_image}")
-tar -c --exclude=node_modules -- coverage.xml hooks skills tests terraform .git .gitignore | podman cp - "${scanner}:/usr/src" \
+{
+    git ls-files -z --cached --others --exclude-standard -- hooks skills tests terraform .gitignore
+    printf '%s\0' .git
+    if [ -e coverage.xml ]; then printf '%s\0' coverage.xml; fi
+} | tar -c --null --ignore-failed-read -T - | podman cp - "${scanner}:/usr/src" \
     || { podman rm -f "${scanner}" >/dev/null; exit 1; }
 scan_status=0
 podman start --attach "${scanner}" || scan_status=$?

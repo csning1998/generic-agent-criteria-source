@@ -152,6 +152,10 @@ def test_intercept_edit_write_denies_bind_mount_script_in_temp_dir(
         ("#!/bin/sh\npodman run -v /srv/a:/a:Z image:1\n", "relabel"),
         ("#!/bin/sh\ngit -c core.hooksPath=/tmp/h commit -m x\n", "hook"),
         ("#!/bin/sh\ngit commit --no-verify -m x\n", "hook"),
+        (
+            "#!/bin/sh\npodman run --security-opt label=type:spc_t img:1\n",
+            "SELinux",
+        ),
     ],
 )
 def test_intercept_edit_write_denies_shell_ban_in_temp_script(
@@ -891,6 +895,9 @@ def test_intercept_bash_allows_commands_without_host_mount(
         "semodule -i local.pp",
         "podman run --security-opt label=disable image:1",
         "docker run --security-opt=label=disable image:1",
+        "podman run --security-opt label=type:spc_t image:1",
+        "docker run --security-opt=label=type:spc_t image:1",
+        "podman run --security-opt type:spc_t image:1",
     ],
 )
 def test_intercept_bash_hard_denies_selinux_label_write(

@@ -65,7 +65,7 @@ SELINUX_WRITE_PATTERN = re.compile(
     re.MULTILINE,
 )
 LABEL_DISABLE_PATTERN = re.compile(
-    r"""--security-opt(?:=|\s+)["']?label[=:]disable\b"""
+    r"""--security-opt(?:=|\s+)["']?(?:label[=:]disable|\S*\bspc_t)\b"""
 )
 HOST_PATH_PREFIXES = ("/", ".", "~", "$")
 # The hook compares paths with these roots and never writes there.
@@ -496,7 +496,7 @@ def enforce_shell_bans(text: str) -> None:
     if has_selinux_state_write(text):
         deny(
             "61-container-runtime-and-selinux.md: SELinux label writes, "
-            "policy changes, and label=disable are prohibited in agent "
+            "policy changes, label=disable, and spc_t are prohibited in agent "
             "commands and agent-written scripts. Report the needed label "
             "to the owner."
         )

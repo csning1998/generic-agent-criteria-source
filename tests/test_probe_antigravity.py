@@ -47,14 +47,6 @@ class FakeResponse(io.BytesIO):
         super().__init__(payload)
         self.headers = {"Content-Encoding": encoding} if encoding else {}
 
-    def __enter__(self) -> FakeResponse:
-        """Return the stub as the context value."""
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        """Close the stub."""
-        self.close()
-
 
 def test_fetch_decodes_a_gzip_payload() -> None:
     """A gzip response body is decompressed."""
@@ -120,14 +112,14 @@ def test_asar_reads_the_package_version_and_the_icon(tmp_path: Path) -> None:
     assert dest.read_bytes() == b"PNG"
 
 
-def test_asar_without_the_entries(tmp_path: Path) -> None:
+def test_read_asar_entry_handles_missing_files(tmp_path: Path) -> None:
     """An asar archive without the entries yields no version and no icon."""
     asar = write_asar(tmp_path / "app.asar", {"other.txt": b"x"})
     assert probe.read_asar_package_version(asar) is None
     assert probe.extract_asar_icon(asar, tmp_path / "icon.png") is False
 
 
-def test_read_ide_version(tmp_path: Path) -> None:
+def test_read_ide_version_reads_product_json(tmp_path: Path) -> None:
     """The IDE version comes from product.json, or None without the file."""
     assert probe.read_ide_version(tmp_path) is None
     product = tmp_path / "resources/app/product.json"
@@ -167,7 +159,7 @@ def test_find_existing_roots_skips_missing_markers_and_duplicates(
     assert roots == [real]
 
 
-def test_main_extract_hub_icon(tmp_path: Path) -> None:
+def test_main_extracts_hub_icon(tmp_path: Path) -> None:
     """The extract-hub-icon mode writes the icon and rejects wrong usage."""
     asar = write_asar(tmp_path / "app.asar", {"icon.png": b"PNG"})
     dest = tmp_path / "icon.png"

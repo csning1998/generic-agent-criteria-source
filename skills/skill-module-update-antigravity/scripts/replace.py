@@ -295,7 +295,7 @@ def backup_live_root(install_root: Path, old_version: str) -> Path | None:
     return backup_dir
 
 
-def contained_sandbox(install_root: Path) -> Path | None:
+def find_contained_sandbox(install_root: Path) -> Path | None:
     """Return chrome-sandbox when it is a regular file inside install_root."""
     sandbox = install_root / "chrome-sandbox"
     if sandbox.is_file() and is_contained_regular(sandbox, install_root):
@@ -318,7 +318,7 @@ def finalize_ide(install_root: Path) -> None:
     ):
         shutil.copy2(code_icon, antigravity_icon)
 
-    sandbox = contained_sandbox(install_root)
+    sandbox = find_contained_sandbox(install_root)
     if sandbox is None:
         return
     # The Electron sandbox requires the 4755 or 755 mode of the old install.
@@ -337,7 +337,7 @@ def finalize_hub(install_root: Path, extract_hub_icon: bool) -> None:
             icon.parent.mkdir(parents=True, exist_ok=True)
             extract_asar_icon(asar, icon)
 
-    sandbox = contained_sandbox(install_root)
+    sandbox = find_contained_sandbox(install_root)
     if sandbox is not None:
         os.chmod(sandbox, 0o755)  # NOSONAR
 

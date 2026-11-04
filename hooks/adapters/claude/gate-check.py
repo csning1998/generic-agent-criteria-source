@@ -429,7 +429,7 @@ def has_selinux_state_write(text: str) -> bool:
 def has_commit_no_verify_flag(command: str) -> bool:
     """Report whether a git commit in command carries the short flag -n."""
     return any(
-        has_commit_no_verify_flag_in_line(line) for line in command.splitlines()
+        has_line_commit_no_verify_flag(line) for line in command.splitlines()
     )
 
 
@@ -451,7 +451,7 @@ def inspect_short_flag_cluster(token: str) -> tuple[bool, bool]:
     return False, False
 
 
-def has_commit_no_verify_flag_in_line(line: str) -> bool:
+def has_line_commit_no_verify_flag(line: str) -> bool:
     """Report whether a git commit in one shell line carries the flag -n."""
     in_git = in_commit = skip_value = False
     for token in parse_shell_tokens(line):

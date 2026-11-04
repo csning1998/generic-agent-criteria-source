@@ -12,12 +12,6 @@ This MR addresses [high-level problem summary derived from the underlying fixes 
 
 ## Verification
 
-### Automated CI & Quality Gates
-
-- [ ] **Static Code Analysis**: SonarQube quality gate passes and maintains test coverage requirements.
-- [ ] **Security Compliance**: Checkov policy scanners confirm zero high or critical misconfigurations.
-- [ ] **Code Review Bot**: Automated reviewer feedback evaluated and resolved.
-
 ### Toolchain Validation (select applicable items)
 
 - [ ] **Python toolchain**:
@@ -33,3 +27,9 @@ Examples: Runtime policy XML output, listener socket bindings, CLI smoke tests, 
 
 - [ ] **[Runtime Assertion / Endpoint Invariant]**: [Specify command, assertion check, or expected state].
 - [ ] **[Service State Invariant]**: [Specify daemon status, socket binding, or idempotency verification].
+
+### Automated CI & Quality Gates
+
+- [ ] **Static Code Analysis**: SonarQube quality gate passes and maintains test coverage requirements.
+- [ ] **Security Compliance**: Checkov policy scanners confirm zero high or critical misconfigurations.
+- [ ] **Code Review Bot**: Automated reviewer feedback evaluated and resolved.

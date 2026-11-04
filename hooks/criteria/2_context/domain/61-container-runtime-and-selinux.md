@@ -20,7 +20,7 @@ Sections 6 and 8 of `ENGINEERING_PRINCIPLES.md` are prerequisites for this file.
 
 A systemd-managed container MUST be declared as a Quadlet unit file (`.container`, `.pod`, `.network`, `.volume`, or `.image`). `podman generate systemd` is deprecated and is forbidden. Quadlet requires cgroup v2.
 
-Official source URL is https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
+Refer to <https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html> for the official Podman Quadlet unit file reference.
 
 A rootless Quadlet file MUST live on the systemd search path of that user and MUST be started by that user's systemd. A service-section `User=` line MUST NOT be used to imitate rootless.
 
@@ -44,17 +44,21 @@ A rootless Quadlet file MUST live on the systemd search path of that user and MU
 
 2. **Boolean Bypass Prohibited**. A global boolean such as `setsebool -P container_manage_cgroup on` MUST NOT be the fix for a single case, unless the meaning of that boolean matches the need and the change is recorded.
 
-3. **Volume Labels**. A host path mounted into a container MUST set a label option. `:z` means shared across containers. `:Z` means private to one container. `:Z` on a shared path removes access from the other containers. Either option on a system directory relabels a wide tree and is high risk. Those options MUST NOT be applied to `/`, `/usr`, `/etc`, or `/var`.
+3. **Volume Labels**. A container mount MUST NOT carry the relabel option `:z`, `:Z`, or `relabel=`. A relabel walks the whole source tree and replaces the label of every file below the source path. A relabel of a parent directory therefore removes access from every running container which mounts a path below that directory. A host path which a container mounts MUST receive its label from a file context rule (`semanage fcontext` and `restorecon`).
 
 4. **Custom Policy**. A custom policy MUST be a policy module (`.te` / `.fc`), MUST be in version control, and MUST be installed by Ansible. Raw `audit2allow` output MUST NOT be applied without review.
 
 5. **SELinux on Kubernetes**. From Kubernetes v1.36, a SELinux volume mount applies the label with `mount -o context=` at mount time and no longer walks the tree. Before the executing Agent writes `seLinuxOptions`, the executing Agent MUST confirm the target cluster version and that mount behavior.
 
-   Official source URL is https://kubernetes.io/blog/2026/04/22/kubernetes-v1-36-release/
+    Refer to <https://kubernetes.io/blog/2026/04/22/kubernetes-v1-36-release/> for the official Kubernetes v1.36 release notes.
+
+6. **Agent Bind Mounts**. A command which the executing Agent runs MUST NOT bind mount a host path into a container through `-v`, `--volume`, or `--mount type=bind`, whether read only or writable. A script which the executing Agent writes for execution on the host, such as a hook copy, MUST NOT declare a host bind mount. A host bind mount produces an access vector cache denial when the host path and the container process carry incompatible SELinux labels. A file which a container requires MUST be transferred into the target container through `podman create` and `podman cp`. The executing Agent MUST NOT run `podman kube play` or a compose command, since both read mounts from a declaration file. `gate-check.py` denies a direct bind mount command, a kube play or compose command, and a script below a temporary directory which contains a host bind mount. `gate-check.py` does not inspect a script outside a temporary directory.
+
+7. **Agent SELinux State Writes**. A command which the executing Agent runs, and a script which the executing Agent writes for execution on the host, MUST NOT write an SELinux label or change SELinux policy. The ban covers `chcon`, `restorecon`, `setfiles`, `chcat`, `semanage`, `setsebool`, and `semodule`, including a call through `sudo` or `podman unshare`, the container option `--security-opt label=disable`, and the super privileged container type `spc_t` (for example `--security-opt label=type:spc_t`). The executing Agent MUST report a needed label or policy change to the owner. `gate-check.py` denies these forms in a command and in a script below a temporary directory. A repository hook which runs `chcon` during `git commit` executes outside the inspection of `gate-check.py`.
 
 ## Section 5. Runtime Privileges
 
-1. **Least Capability**. A container MUST start from `--cap-drop=ALL` and MUST add back only the capabilities that the process needs. `--privileged` is forbidden. `--security-opt label=disable` and `--security-opt seccomp=unconfined` MUST NOT be regular settings.
+1. **Least Capability**. A container MUST start from `--cap-drop=ALL` and MUST add back only the capabilities that the process needs. `--privileged` is forbidden. `--security-opt label=disable`, the super privileged container type `spc_t` (Super Privileged Container), and `--security-opt seccomp=unconfined` MUST NOT be regular settings.
 
 2. **Read-only Root Filesystem**. The container root filesystem MUST be read-only by default. A path that must be writable MUST be a named volume or a tmpfs mount.
 

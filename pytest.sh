@@ -37,20 +37,23 @@ proxy_env=$(vault-proxy-env credential-distributor-generic-agent-criteria-source
 sonar_token=$(eval "${proxy_env}" && vault kv get -mount=secret -field="${sonar_token_field}" "${sonar_token_path}")
 unset proxy_env
 
-# The scanner mounts only the analyzed trees read-only, since the Python indexer walks the whole base directory.
-# The root .gitignore drives the SCM exclusion.
-SONAR_TOKEN="${sonar_token}" podman run --rm --network host \
-    --security-opt label=type:spc_t \
+# Ingesting sources via podman cp assigns container SELinux labels without host bind mounts.
+# Exit traps purge stored container state holding SONAR_TOKEN.
+scanner=""
+remove_scanner() { if [ -n "${scanner}" ]; then podman rm -f "${scanner}" >/dev/null 2>&1 || true; scanner=""; fi; }
+trap 'rm -f "$coverage_rc"; remove_scanner' EXIT
+trap 'remove_scanner; exit 130' INT TERM
+scanner=$(SONAR_TOKEN="${sonar_token}" podman create --network host \
     -e SONAR_HOST_URL="${sonar_host_url}" \
     -e SONAR_TOKEN \
-    -e SONAR_SCANNER_OPTS="-Dsonar.projectKey=${sonar_project_key} -Dsonar.projectBaseDir=/usr/src -Dsonar.qualitygate.wait=true -Dsonar.sources=hooks,skills,terraform -Dsonar.exclusions=**/.terraform/**,**/__pycache__/** -Dsonar.tests=tests -Dsonar.test.inclusions=tests/test_*.py -Dsonar.python.coverage.reportPaths=coverage.xml" \
-    -v "$PWD/coverage.xml:/usr/src/coverage.xml:ro" \
-    -v "$PWD/hooks:/usr/src/hooks:ro" \
-    -v "$PWD/skills:/usr/src/skills:ro" \
-    -v "$PWD/tests:/usr/src/tests:ro" \
-    -v "$PWD/terraform:/usr/src/terraform:ro" \
-    -v "$PWD/.git:/usr/src/.git:ro" \
-    -v "$PWD/.gitignore:/usr/src/.gitignore:ro" \
-    "${scanner_image}"
+    -e SONAR_SCANNER_OPTS="-Dsonar.projectKey=${sonar_project_key} -Dsonar.projectBaseDir=/usr/src -Dsonar.qualitygate.wait=true -Dsonar.sources=hooks,skills,terraform -Dsonar.exclusions=**/.terraform/**,**/__pycache__/** -Dsonar.tests=tests -Dsonar.test.inclusions=tests/test_*.py -Dsonar.python.coverage.reportPaths=coverage.xml -Dsonar.python.version=3.11,3.12,3.13,3.14" \
+    "${scanner_image}")
+{
+    git ls-files -z --cached --others --exclude-standard -- hooks skills tests terraform .gitignore
+    printf '%s\0' .git
+    if [ -e coverage.xml ]; then printf '%s\0' coverage.xml; fi
+} | tar -c --null --ignore-failed-read -T - | podman cp - "${scanner}:/usr/src"
+podman start --attach "${scanner}"
+remove_scanner
 
 echo "sonar: ${sonar_project_key}"

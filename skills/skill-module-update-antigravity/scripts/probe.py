@@ -82,35 +82,35 @@ def resolve_official() -> dict[str, dict[str, str]]:
     }
 
 
-def read_asar_package_version(asar_path: Path) -> str | None:
-    """Read package.json version from an Electron asar archive."""
+def read_asar_entry(asar_path: Path, name: str) -> bytes | None:
+    """Return the bytes of a top-level asar file, or None if absent."""
     with asar_path.open("rb") as handle:
         handle.read(4)
         header_size = struct.unpack("<I", handle.read(4))[0]
         handle.read(4)
         json_size = struct.unpack("<I", handle.read(4))[0]
         header = json.loads(handle.read(json_size).decode())
-        info = header.get("files", {}).get("package.json")
+        info = header.get("files", {}).get(name)
         if not info:
             return None
         handle.seek(8 + header_size + int(info["offset"]))
-        pkg = json.loads(handle.read(int(info["size"])).decode())
-    return pkg.get("version")
+        return handle.read(int(info["size"]))
+
+
+def read_asar_package_version(asar_path: Path) -> str | None:
+    """Read package.json version from an Electron asar archive."""
+    data = read_asar_entry(asar_path, "package.json")
+    if data is None:
+        return None
+    return json.loads(data.decode()).get("version")
 
 
 def extract_asar_icon(asar_path: Path, dest: Path) -> bool:
     """Write icon.png from an asar archive to dest. Return False if absent."""
-    with asar_path.open("rb") as handle:
-        handle.read(4)
-        header_size = struct.unpack("<I", handle.read(4))[0]
-        handle.read(4)
-        json_size = struct.unpack("<I", handle.read(4))[0]
-        header = json.loads(handle.read(json_size).decode())
-        icon = header.get("files", {}).get("icon.png")
-        if not icon:
-            return False
-        handle.seek(8 + header_size + int(icon["offset"]))
-        dest.write_bytes(handle.read(int(icon["size"])))
+    data = read_asar_entry(asar_path, "icon.png")
+    if data is None:
+        return False
+    dest.write_bytes(data)
     return True
 
 

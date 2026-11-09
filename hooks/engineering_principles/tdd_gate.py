@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import fnmatch
 import re
+import subprocess
 from pathlib import Path
 from pathlib import PurePath
 from typing import Any
@@ -133,63 +134,156 @@ def find_tdd_write_deny_reason(
     return None
 
 
+def record_tdd_test_mutation(
+    state: dict[str, Any], path: str, stage: str
+) -> bool:
+    """Record test file mutation and transition state to red_pending."""
+    if stage != "green_authorized":
+        state["tdd_stage"] = "red_pending_verification"
+    mods = state.setdefault("tdd_modified_tests", [])
+    if path and path not in mods:
+        mods.append(path)
+    state["tdd_lint_verified"] = False
+    return True
+
+
+def record_tdd_production_mutation(state: dict[str, Any], stage: str) -> bool:
+    """Record production file mutation under green_authorized stage."""
+    if stage != "green_authorized":
+        return False
+    state["tdd_prod_mutated_in_green"] = True
+    state["tdd_tests_passed_in_green"] = False
+    state["tdd_lint_verified"] = False
+    return True
+
+
+def record_tdd_mutation_tool(
+    state: dict[str, Any], path: str, workspace_root: Path, stage: str
+) -> bool:
+    """Record file mutation from a mutating tool call."""
+    if is_tdd_test_path(path):
+        return record_tdd_test_mutation(state, path, stage)
+    if is_tdd_production_path(path, workspace_root):
+        return record_tdd_production_mutation(state, stage)
+    return False
+
+
+def record_tdd_test_runner(
+    state: dict[str, Any], stage: str, has_error: bool
+) -> bool:
+    """Record test runner result and update stage accordingly."""
+    if stage in {"red_pending_verification", "red_verified", "premature_green"}:
+        state["tdd_stage"] = "red_verified" if has_error else "premature_green"
+        return True
+    if stage == "green_authorized" and not has_error:
+        state["tdd_tests_passed_in_green"] = True
+        return True
+    return False
+
+
+def record_tdd_linter(
+    state: dict[str, Any], stage: str, has_error: bool
+) -> bool:
+    """Record linter execution and advance idle stage when complete."""
+    if has_error:
+        return False
+    state["tdd_lint_verified"] = True
+    if stage == "green_authorized" and state.get("tdd_tests_passed_in_green"):
+        state["tdd_stage"] = "idle"
+        state["tdd_modified_tests"] = []
+    return True
+
+
+def record_tdd_command(
+    state: dict[str, Any], command: str, has_error: bool, stage: str
+) -> bool:
+    """Record test runner and linter commands from shell tool executions."""
+    changed = False
+    if TEST_RUNNER_CMD_RE.search(command):
+        changed = record_tdd_test_runner(state, stage, has_error) or changed
+    if LINTER_CMD_RE.search(command):
+        changed = record_tdd_linter(state, stage, has_error) or changed
+    return changed
+
+
 def record_tdd_post_tool(
     payload: dict[str, Any], tool: str, path: str, command: str
 ) -> None:
     """Record test modifications, test runner executions, and linter runs."""
     state = load_state(payload)
-    changed = False
-    workspace_root = resolve_workspace_root(payload)
     stage = state.get("tdd_stage", "idle")
+    changed = False
 
     if tool in MUTATING_TOOLS:
-        if is_tdd_test_path(path):
-            if stage != "green_authorized":
-                state["tdd_stage"] = "red_pending_verification"
-            mods = state.setdefault("tdd_modified_tests", [])
-            if path and path not in mods:
-                mods.append(path)
-            state["tdd_lint_verified"] = False
-            changed = True
-        elif is_tdd_production_path(path, workspace_root):
-            if stage == "green_authorized":
-                state["tdd_prod_mutated_in_green"] = True
-                state["tdd_tests_passed_in_green"] = False
-                state["tdd_lint_verified"] = False
-                changed = True
+        workspace_root = resolve_workspace_root(payload)
+        changed = (
+            record_tdd_mutation_tool(state, path, workspace_root, stage)
+            or changed
+        )
 
-    if tool in {"runcommand", "runterminalcommand", "bash"} or command:
-        if TEST_RUNNER_CMD_RE.search(command):
-            error = payload.get("error")
-            if stage in {"red_pending_verification", "red_verified"}:
-                if error:
-                    state["tdd_stage"] = "red_verified"
-                else:
-                    state["tdd_stage"] = "premature_green"
-                changed = True
-            elif stage == "green_authorized" and not error:
-                state["tdd_tests_passed_in_green"] = True
-                changed = True
-
-        if LINTER_CMD_RE.search(command):
-            error = payload.get("error")
-            if not error:
-                state["tdd_lint_verified"] = True
-                if stage == "green_authorized" and state.get(
-                    "tdd_tests_passed_in_green"
-                ):
-                    state["tdd_stage"] = "idle"
-                    state["tdd_modified_tests"] = []
-                changed = True
+    is_cmd_tool = tool in {"runcommand", "runterminalcommand", "bash"}
+    if (is_cmd_tool or command) and command:
+        has_error = bool(payload.get("error"))
+        changed = (
+            record_tdd_command(state, command, has_error, stage) or changed
+        )
 
     if changed:
         persist_state(payload, state)
+
+
+def is_git_dirty_path(path: str, workspace_root: Path) -> bool:
+    """Return True if path holds uncommitted or untracked changes in git."""
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain", "--", path],
+            cwd=workspace_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if proc.returncode != 0:
+            return True
+        return bool(proc.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return True
+
+
+def find_green_authorized_block_reason(
+    state: dict[str, Any],
+) -> str | None:
+    """Return deny reason if green stage mutations lack test or lint proof."""
+    mutated = state.get("tdd_prod_mutated_in_green")
+    passed = state.get("tdd_tests_passed_in_green")
+    linted = state.get("tdd_lint_verified")
+    if mutated and not passed:
+        return (
+            "202_Test_Driven_Development.md § 202(e). Post-authorization "
+            "verification: automated tests covering green implementation "
+            "must be executed and pass."
+        )
+    if mutated and not linted:
+        return (
+            "202_Test_Driven_Development.md § 202(e). Post-authorization "
+            "verification: applicable linters must pass on green changes."
+        )
+    return None
 
 
 def find_tdd_stop_block_reason(payload: dict[str, Any]) -> str | None:
     """Return stop reason when turn concludes without meeting TDD checks."""
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
+    workspace_root = resolve_workspace_root(payload)
+
+    if stage in {"red_pending_verification", "premature_green", "red_verified"}:
+        mods = state.get("tdd_modified_tests", [])
+        if mods and not any(is_git_dirty_path(p, workspace_root) for p in mods):
+            state["tdd_stage"] = "idle"
+            state["tdd_modified_tests"] = []
+            persist_state(payload, state)
+            return None
 
     if stage == "red_pending_verification":
         return (
@@ -209,18 +303,5 @@ def find_tdd_stop_block_reason(payload: dict[str, Any]) -> str | None:
             "presentation."
         )
     if stage == "green_authorized":
-        mutated = state.get("tdd_prod_mutated_in_green")
-        passed = state.get("tdd_tests_passed_in_green")
-        linted = state.get("tdd_lint_verified")
-        if mutated and not passed:
-            return (
-                "202_Test_Driven_Development.md § 202(e). Post-authorization "
-                "verification: automated tests covering green implementation "
-                "must be executed and pass."
-            )
-        if mutated and not linted:
-            return (
-                "202_Test_Driven_Development.md § 202(e). Post-authorization "
-                "verification: applicable linters must pass on green changes."
-            )
+        return find_green_authorized_block_reason(state)
     return None

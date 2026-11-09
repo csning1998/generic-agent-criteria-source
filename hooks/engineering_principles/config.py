@@ -101,10 +101,10 @@ GREEN_AUTH_RE = re.compile(
     re.I,
 )
 TEST_RUNNER_CMD_RE = re.compile(
-    r"\b(pytest|py\.test|bun\s+test|bun\s+run\s+[^\n]*test|npm\s+test|npx\s+vitest|npx\s+jest|go\s+test)\b"
+    r"\b(py\.?test|(?:bun(?:\s+run)?|npm|go)\s+test|npx\s+(?:vitest|jest))\b"
 )
 LINTER_CMD_RE = re.compile(
-    r"\b(ruff\s+check|eslint|tsc\b|bun\s+run\s+[^\n]*(?:lint|check|build)|ng\s+lint|golangci-lint)\b"
+    r"\b(ruff\s+check|eslint|tsc|ng\s+lint|golangci-lint|bun\s+run\s+(?:lint|check|build))\b"
 )
 TDD_TEST_GLOBS = (
     "**/tests/**",

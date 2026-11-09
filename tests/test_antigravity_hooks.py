@@ -1063,3 +1063,88 @@ def test_record_tdd_prompt_authorization_green_phrase_advances_stage_to_green(
     record_tdd_prompt_authorization(payload, phrase)
     updated = load_state(payload)
     assert updated.get("tdd_stage") == "green_authorized"
+
+
+def test_is_scaffolding_only_text_docstring_with_keywords_returns_true() -> (
+    None
+):
+    """Docstrings containing control keywords remain valid scaffolding stubs."""
+    stub = (
+        "def calculate_tax(amount: int) -> int:\n"
+        '    """Compute tax for the given case and return amount."""\n'
+        "    pass\n"
+    )
+    assert is_scaffolding_only_text(stub) is True
+
+
+def test_find_tdd_write_deny_reason_premature_green_denies_logic_write(
+    agy_workspace: Path,
+) -> None:
+    """Deny non-scaffolding writes when in premature_green stage."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "premature_green"
+    persist_state(payload, state)
+
+    prod_file = agy_workspace / "service.py"
+    prod_file.write_text("# existing\n", encoding="utf-8")
+    logic_code = "def calc():\n    return 42\n"
+    reason = find_tdd_write_deny_reason(payload, str(prod_file), logic_code)
+    assert reason is not None
+    assert "202(a)(1)" in reason
+
+
+def test_record_tdd_green_stage_order_independent_completion(
+    agy_workspace: Path,
+) -> None:
+    """Linter before test runner also resets green stage to idle."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_prod_mutated_in_green"] = True
+    persist_state(payload, state)
+
+    # Linter runs first
+    record_tdd_post_tool(payload, "runcommand", "", "ruff check .")
+    mid_state = load_state(payload)
+    assert mid_state["tdd_stage"] == "green_authorized"
+    assert mid_state["tdd_lint_verified"] is True
+
+    # Test runner runs second
+    record_tdd_post_tool(payload, "runcommand", "", "pytest")
+    final_state = load_state(payload)
+    assert final_state["tdd_stage"] == "idle"
+    assert final_state["tdd_modified_tests"] == []
+
+
+def test_record_tdd_green_stage_requires_prod_mutation_before_idle(
+    agy_workspace: Path,
+) -> None:
+    """Tests and linter before prod mutation do not reset stage to idle."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_prod_mutated_in_green"] = False
+    persist_state(payload, state)
+
+    record_tdd_post_tool(payload, "runcommand", "", "pytest")
+    record_tdd_post_tool(payload, "runcommand", "", "ruff check .")
+    updated = load_state(payload)
+    assert updated["tdd_stage"] == "green_authorized"
+
+
+def test_record_tdd_test_and_linter_failure_resets_pass_flags() -> None:
+    """Subsequent test or linter failure resets green verified flags."""
+    from engineering_principles.tdd_gate import record_tdd_linter
+    from engineering_principles.tdd_gate import record_tdd_test_runner
+
+    state = {
+        "tdd_stage": "green_authorized",
+        "tdd_tests_passed_in_green": True,
+        "tdd_lint_verified": True,
+    }
+    record_tdd_test_runner(state, "green_authorized", has_error=True)
+    assert state["tdd_tests_passed_in_green"] is False
+
+    record_tdd_linter(state, "green_authorized", has_error=True)
+    assert state["tdd_lint_verified"] is False

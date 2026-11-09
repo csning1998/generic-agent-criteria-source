@@ -60,14 +60,20 @@ def is_scaffolding_only_text(text: str) -> bool:
     clean = text.strip()
     if not clean:
         return True
-    if re.search(r"\b(if|elif|while|for|match|case|switch)\b", clean):
-        return False
-    if re.search(r"\breturn\s+[^\n#]+", clean):
-        return False
     try:
         tree = ast.parse(clean)
         for node in ast.walk(tree):
-            if isinstance(node, (ast.If, ast.For, ast.While, ast.Match)):
+            if isinstance(
+                node,
+                (
+                    ast.If,
+                    ast.IfExp,
+                    ast.For,
+                    ast.AsyncFor,
+                    ast.While,
+                    ast.Match,
+                ),
+            ):
                 return False
             if isinstance(node, ast.Return) and node.value is not None:
                 return False
@@ -77,7 +83,10 @@ def is_scaffolding_only_text(text: str) -> bool:
                 return False
         return True
     except SyntaxError:
-        pass
+        if re.search(r"\b(if|elif|while|for|match|case|switch)\b", clean):
+            return False
+        if re.search(r"\breturn\s+[^\n#]+", clean):
+            return False
     return True
 
 
@@ -89,7 +98,7 @@ def record_tdd_prompt_authorization(
         return
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
-    if stage in {"red_verified", "red_pending_verification"}:
+    if stage in {"red_verified", "red_pending_verification", "premature_green"}:
         state["tdd_stage"] = "green_authorized"
         state["tdd_tests_passed_in_green"] = False
         state["tdd_lint_verified"] = False
@@ -117,7 +126,7 @@ def find_tdd_write_deny_reason(
         record_tdd_prompt_authorization(payload, prompt)
         return None
 
-    if stage == "red_pending_verification":
+    if stage in {"red_pending_verification", "premature_green"}:
         if not is_scaffolding_only_text(text):
             return (
                 "202_Test_Driven_Development.md § 202(a)(1). Red step "
@@ -168,6 +177,17 @@ def record_tdd_mutation_tool(
     return False
 
 
+def _reconcile_green_completion(state: dict[str, Any]) -> None:
+    """Transition green_authorized stage to idle when all checks pass."""
+    if (
+        state.get("tdd_prod_mutated_in_green")
+        and state.get("tdd_tests_passed_in_green")
+        and state.get("tdd_lint_verified")
+    ):
+        state["tdd_stage"] = "idle"
+        state["tdd_modified_tests"] = []
+
+
 def record_tdd_test_runner(
     state: dict[str, Any], stage: str, has_error: bool
 ) -> bool:
@@ -175,8 +195,10 @@ def record_tdd_test_runner(
     if stage in {"red_pending_verification", "red_verified", "premature_green"}:
         state["tdd_stage"] = "red_verified" if has_error else "premature_green"
         return True
-    if stage == "green_authorized" and not has_error:
-        state["tdd_tests_passed_in_green"] = True
+    if stage == "green_authorized":
+        state["tdd_tests_passed_in_green"] = not has_error
+        if not has_error:
+            _reconcile_green_completion(state)
         return True
     return False
 
@@ -185,12 +207,9 @@ def record_tdd_linter(
     state: dict[str, Any], stage: str, has_error: bool
 ) -> bool:
     """Record linter execution and advance idle stage when complete."""
-    if has_error:
-        return False
-    state["tdd_lint_verified"] = True
-    if stage == "green_authorized" and state.get("tdd_tests_passed_in_green"):
-        state["tdd_stage"] = "idle"
-        state["tdd_modified_tests"] = []
+    state["tdd_lint_verified"] = not has_error
+    if not has_error and stage == "green_authorized":
+        _reconcile_green_completion(state)
     return True
 
 

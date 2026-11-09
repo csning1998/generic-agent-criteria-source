@@ -96,6 +96,25 @@ ALLOW_FULL_OVERWRITE_RE = re.compile(
     r"\ballow\s+full\s+overwrite\b",
     re.I,
 )
+GREEN_AUTH_RE = re.compile(
+    r"(可以轉綠|轉綠|進入綠燈|執行綠燈|authorize green|proceed to green)",
+    re.I,
+)
+TEST_RUNNER_CMD_RE = re.compile(
+    r"\b(pytest|py\.test|bun\s+test|bun\s+run\s+[^\n]*test|npm\s+test|npx\s+vitest|npx\s+jest|go\s+test)\b"
+)
+LINTER_CMD_RE = re.compile(
+    r"\b(ruff\s+check|eslint|tsc\b|bun\s+run\s+[^\n]*(?:lint|check|build)|ng\s+lint|golangci-lint)\b"
+)
+TDD_TEST_GLOBS = (
+    "**/tests/**",
+    "*_test.py",
+    "*_test.go",
+    "*.test.ts",
+    "*.test.tsx",
+    "*.spec.ts",
+    "*.spec.tsx",
+)
 BOOTSTRAPPER_NAME_RE = re.compile(r"bootstrapper", re.I)
 ARCHITECTURE_STEM_RE = re.compile(r"^architecture_(.+)$")
 

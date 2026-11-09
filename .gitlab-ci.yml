@@ -20,7 +20,9 @@ include:
       package_manager: uv
       python_image: ghcr.io/astral-sh/uv:python3.11-alpine
       python_globs: ["hooks/**/*.py", "skills/**/*.py", "tests/**/*.py"]
-      python_test_cmd: uv pip install pytest-cov --system && pytest --cov=hooks --cov=skills --cov-report=xml:coverage.xml --junitxml=junit.xml
+      python_test_cmd: >-
+        uv pip install pytest-cov --system &&
+        pytest --cov=hooks --cov=skills --cov-report=xml:coverage.xml --junitxml=junit.xml
       test_stage: test
   - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/auto-tag@1.8.2
     inputs:

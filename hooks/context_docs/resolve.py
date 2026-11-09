@@ -208,6 +208,47 @@ def resolve_catalog_socket(
     }
 
 
+def _is_valid_skill_name(name: object) -> bool:
+    """Return True if name is a valid skill directory name."""
+    return (
+        isinstance(name, str)
+        and bool(name.strip())
+        and name not in {".", ".."}
+        and "/" not in name
+    )
+
+
+def _resolve_pack_skill_sources(
+    config_path: Path,
+    pack_id: str,
+    section: dict[str, object],
+    sources: dict[str, Path],
+) -> str | None:
+    """Validate and record skill sources for one pack."""
+    listed = section.get("skills")
+    if not listed:
+        return None
+    if not isinstance(listed, list):
+        return f"context.{pack_id}.skills is absent"
+    raw_path = section.get("skills_path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return f"context.{pack_id}.skills_path is absent"
+    root = _resolve_contained_directory(config_path, raw_path)
+    if root is None:
+        return _MISSING_SKILLS_PATH
+    for name in listed:
+        if not _is_valid_skill_name(name):
+            return f"context.{pack_id}.skills is absent"
+        source = (root / str(name)).resolve()
+        if not source.exists():
+            return "source-missing"
+        previous = sources.get(str(name))
+        if previous is not None and previous != source:
+            return f"skill name collision: {name}"
+        sources[str(name)] = source
+    return None
+
+
 def resolve_catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
     """Return declared skill name to source path, or an error string."""
     if not config_path.is_file():
@@ -225,32 +266,11 @@ def resolve_catalog_skill_sources(config_path: Path) -> dict[str, Path] | str:
     for pack_id, section in context.items():
         if not isinstance(section, dict):
             continue
-        listed = section.get("skills")
-        if not listed:
-            continue
-        if not isinstance(listed, list):
-            return f"context.{pack_id}.skills is absent"
-        raw_path = section.get("skills_path")
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            return f"context.{pack_id}.skills_path is absent"
-        root = _resolve_contained_directory(config_path, raw_path)
-        if root is None:
-            return _MISSING_SKILLS_PATH
-        for name in listed:
-            if (
-                not isinstance(name, str)
-                or not name.strip()
-                or name in {".", ".."}
-                or "/" in name
-            ):
-                return f"context.{pack_id}.skills is absent"
-            source = (root / name).resolve()
-            if not source.exists():
-                return "source-missing"
-            previous = sources.get(name)
-            if previous is not None and previous != source:
-                return f"skill name collision: {name}"
-            sources[name] = source
+        err = _resolve_pack_skill_sources(
+            config_path, pack_id, section, sources
+        )
+        if err is not None:
+            return err
     return sources
 
 

@@ -19,6 +19,16 @@ MODE_SYMLINK = "symlink"
 MODE_COPY = "copy"
 MODE_CURSOR_MDC = "cursor-mdc"
 MODE_TEMPLATE = "template"
+_DEST_GROK_SKILLS = ".grok/skills"
+_BLOCKED_DRIFT_STATUSES = frozenset(
+    {
+        "regular-differs",
+        "source-missing",
+        "dest-escapes",
+        "unexpected-type",
+        "skill-name-conflict",
+    }
+)
 _ALLOWED_PREFIXES = (
     ".agents/",
     ".claude/",
@@ -182,7 +192,7 @@ _STATIC_SPECS: tuple[AdapterSpec, ...] = (
     ),
     AdapterSpec(
         source="skills",
-        dest=".grok/skills",
+        dest=_DEST_GROK_SKILLS,
         mode=MODE_SYMLINK,
     ),
     AdapterSpec(
@@ -537,7 +547,7 @@ def _is_applyable(state: str) -> bool:
 def _is_skills_directory_spec(spec: AdapterSpec) -> bool:
     """Return True for the per-skill link directory."""
     return spec.source == "skills" and spec.dest in (
-        ".grok/skills",
+        _DEST_GROK_SKILLS,
         ".gemini/config/skills",
     )
 
@@ -579,48 +589,72 @@ def _is_identical_entry(child: Path, source: Path) -> bool:
     return False
 
 
-def _inspect_skills_directory(
-    grok_root: Path, home: Path, dest_rel: str = ".grok/skills"
-) -> str:
-    """Return drift for a skills directory as one symlink per skill."""
-    expected = _resolve_skill_links(grok_root, home)
-    if isinstance(expected, str):
-        if expected.startswith("skill name collision:"):
-            return "skill-name-conflict"
-        if expected == "source-missing":
-            return "source-missing"
-        return "unexpected-type"
-    dest = home.joinpath(*Path(dest_rel).parts)
+def _find_expected_links_error(expected: str) -> str:
+    """Return drift status token for an expected links error string."""
+    if expected.startswith("skill name collision:"):
+        return "skill-name-conflict"
+    if expected == "source-missing":
+        return "source-missing"
+    return "unexpected-type"
+
+
+def _find_skills_container_error(dest: Path) -> str | None:
+    """Return drift status when dest is not a usable directory."""
     if dest.is_symlink():
         return "collapsed-symlink"
     if not dest.exists():
         return "missing"
     if not dest.is_dir():
         return "unexpected-type"
+    return None
+
+
+def _find_skill_child_drift(
+    child: Path, source: Path, is_present: bool
+) -> tuple[str, bool]:
+    """Return (drift_status, needs_link) for a single expected skill."""
+    if not is_present:
+        return ("ok", True)
+    if _is_symlink_target(child, source):
+        return ("ok", False)
+    if child.is_symlink():
+        return ("regular-differs", False)
+    if _is_identical_entry(child, source):
+        return ("ok", True)
+    return ("regular-differs", False)
+
+
+def _inspect_skills_directory(
+    grok_root: Path, home: Path, dest_rel: str = _DEST_GROK_SKILLS
+) -> str:
+    """Return drift for a skills directory as one symlink per skill."""
+    expected = _resolve_skill_links(grok_root, home)
+    if isinstance(expected, str):
+        return _find_expected_links_error(expected)
+    dest = home.joinpath(*Path(dest_rel).parts)
+    container_error = _find_skills_container_error(dest)
+    if container_error is not None:
+        return container_error
     present = {child.name for child in dest.iterdir()}
-    if dest_rel == ".grok/skills" and (present - expected.keys()):
+    if dest_rel == _DEST_GROK_SKILLS and (present - expected.keys()):
         return "regular-differs"
     needs_link = False
     for name, source in expected.items():
         child = dest / name
-        if name not in present:
+        drift, req_link = _find_skill_child_drift(
+            child, source, name in present
+        )
+        if drift != "ok":
+            return drift
+        if req_link:
             needs_link = True
-            continue
-        if _is_symlink_target(child, source):
-            continue
-        if child.is_symlink():
-            return "regular-differs"
-        if _is_identical_entry(child, source):
-            needs_link = True
-            continue
-        return "regular-differs"
     if needs_link:
         return "incomplete"
     return "ok"
 
 
 def _reconcile_skills_directory(
-    grok_root: Path, home: Path, dest_rel: str = ".grok/skills"
+    grok_root: Path, home: Path, dest_rel: str = _DEST_GROK_SKILLS
 ) -> str:
     """Create one symlink per skill. Leave unexpected names in place."""
     state = _inspect_skills_directory(grok_root, home, dest_rel=dest_rel)
@@ -754,33 +788,25 @@ def _render_outcomes(outcomes: dict[str, str]) -> list[str]:
     return [f"{outcomes[dest]}{dest}" for dest in sorted(outcomes)]
 
 
-def reconcile_all_specs(grok_root: Path, home: Path) -> int:
-    """Refuse mismatched dests, then materialize. Return 1 on abort."""
+def _find_blocked_specs(grok_root: Path, home: Path) -> list[tuple[str, str]]:
+    """Return blocked destination and status pairs for unready specs."""
     blocked: list[tuple[str, str]] = []
     for spec in SORTED_SPECS:
         status = inspect_spec_drift(grok_root, home, spec)
-        if status == "ok":
-            continue
-        if status == "regular-differs":
+        if status in _BLOCKED_DRIFT_STATUSES:
             blocked.append((spec.dest, status))
-            continue
-        if status == "source-missing" or status == "dest-escapes":
-            blocked.append((spec.dest, status))
-            continue
-        if status == "unexpected-type" or status == "skill-name-conflict":
-            blocked.append((spec.dest, status))
-    if blocked:
-        for dest, status in blocked:
-            print(f"ABORTED {dest}: {status}")
-        return 1
+    return blocked
+
+
+def _reconcile_specs_batch(grok_root: Path, home: Path) -> int:
+    """Apply each spec in order, returning 0 on success or 1 on abort."""
     outcomes: dict[str, str] = {}
     for spec in SPECS:
         result = reconcile_spec(grok_root, home, spec)
-        if result == "skipped":
-            outcomes[spec.dest] = "SKIPPED "
-            continue
-        if result == "applied":
-            outcomes[spec.dest] = "APPLIED "
+        if result in ("skipped", "applied"):
+            outcomes[spec.dest] = (
+                "SKIPPED " if result == "skipped" else "APPLIED "
+            )
             continue
         for line in _render_outcomes(outcomes):
             print(line)
@@ -789,6 +815,16 @@ def reconcile_all_specs(grok_root: Path, home: Path) -> int:
     for line in _render_outcomes(outcomes):
         print(line)
     return 0
+
+
+def reconcile_all_specs(grok_root: Path, home: Path) -> int:
+    """Refuse mismatched dests, then materialize. Return 1 on abort."""
+    blocked = _find_blocked_specs(grok_root, home)
+    if blocked:
+        for dest, status in blocked:
+            print(f"ABORTED {dest}: {status}")
+        return 1
+    return _reconcile_specs_batch(grok_root, home)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

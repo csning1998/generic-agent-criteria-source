@@ -51,6 +51,9 @@ from engineering_principles.state import persist_state
 from engineering_principles.state import resolve_workspace_root
 
 
+SECTION_3_ITEM_A1 = "Section 3 Item A.1"
+
+
 def has_added_match(before: str, after: str, pattern: re.Pattern[str]) -> bool:
     """Return True when after introduces a new pattern hit."""
     if not after or not pattern.search(after):
@@ -86,6 +89,7 @@ def record_read(payload: dict[str, Any], path: str) -> dict[str, Any]:
         tool_input_data.get("StartLine")
         or tool_input_data.get("EndLine")
         or tool_input_data.get("ContentOffset")
+        or tool_input_data.get("ByteOffset")
     )
     candidate = Path(path).expanduser()
     if not is_partial and candidate.is_file():
@@ -230,7 +234,7 @@ def find_missing_manifest_reason(
         if not is_governed_path(target):
             return None
         return render_cite(
-            "Section 3 Item A.1",
+            SECTION_3_ITEM_A1,
             "",
             None,
             "The planning manifest is invalid, so the architecture gate "
@@ -257,7 +261,7 @@ def find_missing_manifest_reason(
     if not missing:
         return None
     return render_cite(
-        "Section 3 Item A.1",
+        SECTION_3_ITEM_A1,
         "",
         None,
         "Architecture gate: read these files with read_file before mutating "
@@ -328,7 +332,7 @@ def find_missing_planning_reason(
     if not missing:
         return None
     return render_cite(
-        "Section 3 Item A.1",
+        SECTION_3_ITEM_A1,
         "",
         None,
         "Architecture gate: read these files with read_file before mutating "
@@ -451,29 +455,13 @@ def find_mutating_sql_file_reason(
     )
 
 
-def find_write_deny_reason(
-    payload: dict[str, Any],
-    path: str,
-    text: str,
-    command: str,
-    before: str = "",
+def find_generic_module_write_reason(
+    state: dict[str, Any], path: str, text: str, before: str
 ) -> str | None:
-    """Return a deny reason for a forbidden write, or None to allow."""
-    state = load_state(payload)
-    if path and is_self_path(path):
+    """Return deny reason for generic module violations."""
+    if not is_generic_module(path):
         return None
-
-    reason = find_guest_sql_command_reason(state, command)
-    if reason:
-        return reason
-
-    if command and not path:
-        return find_command_without_path_reason(payload, state, command)
-
-    if not path:
-        return None
-
-    if is_generic_module(path) and not has_generic_leave_cover(state, path):
+    if not has_generic_leave_cover(state, path):
         return render_cite(
             "Section 3 Item A.2",
             "",
@@ -482,43 +470,47 @@ def find_write_deny_reason(
             "leave for this module in this session. Owner phrase: "
             "leave generic module.",
         )
+    if has_added_match(before, text, HARDCODED_VAULT_PRODUCTION_RE):
+        return render_cite(
+            "Section 3 Item A.3",
+            text,
+            HARDCODED_VAULT_PRODUCTION_RE,
+            "Generic module still cannot hardcode vault.production. "
+            "The caller binds the Vault provider.",
+        )
+    if has_added_match(before, text, TAUTOLOGICAL_PROVIDER_RE):
+        return render_cite(
+            "Section 3 Item A.3",
+            text,
+            TAUTOLOGICAL_PROVIDER_RE,
+            "Tautological providers map vault = vault is forbidden.",
+        )
+    if has_added_match(before, text, PRODUCT_TOKEN_RE):
+        return render_cite(
+            "Section 3 Item A.4",
+            text,
+            PRODUCT_TOKEN_RE,
+            "Generic module still cannot name a product in variables, "
+            "resources, tags, or outputs. The caller supplies those "
+            "values.",
+        )
+    if has_env_alias_in_generic(text) and (
+        not before or not has_env_alias_in_generic(before)
+    ):
+        return render_cite(
+            "Section 3 Item A.3",
+            text,
+            ENV_ALIAS_RE,
+            "Generic module still cannot hardcode environment aliases "
+            "such as prod, stg, or dev.",
+        )
+    return None
 
-    if is_generic_module(path) and has_generic_leave_cover(state, path):
-        if has_added_match(before, text, HARDCODED_VAULT_PRODUCTION_RE):
-            return render_cite(
-                "Section 3 Item A.3",
-                text,
-                HARDCODED_VAULT_PRODUCTION_RE,
-                "Generic module still cannot hardcode vault.production. "
-                "The caller binds the Vault provider.",
-            )
-        if has_added_match(before, text, TAUTOLOGICAL_PROVIDER_RE):
-            return render_cite(
-                "Section 3 Item A.3",
-                text,
-                TAUTOLOGICAL_PROVIDER_RE,
-                "Tautological providers map vault = vault is forbidden.",
-            )
-        if has_added_match(before, text, PRODUCT_TOKEN_RE):
-            return render_cite(
-                "Section 3 Item A.4",
-                text,
-                PRODUCT_TOKEN_RE,
-                "Generic module still cannot name a product in variables, "
-                "resources, tags, or outputs. The caller supplies those "
-                "values.",
-            )
-        if has_env_alias_in_generic(text) and (
-            not before or not has_env_alias_in_generic(before)
-        ):
-            return render_cite(
-                "Section 3 Item A.3",
-                text,
-                ENV_ALIAS_RE,
-                "Generic module still cannot hardcode environment aliases "
-                "such as prod, stg, or dev.",
-            )
 
+def find_iac_policy_write_reason(
+    path: str, text: str, before: str
+) -> str | None:
+    """Return deny reason for IaC naming and resource policy violations."""
     if path and is_introduced_bootstrapper_name(path):
         return (
             "99-hook-contract.md Section 3 Item A.4. Name gate: do not create "
@@ -557,17 +549,24 @@ def find_write_deny_reason(
             PROVISIONER_RE,
             "local-exec and remote-exec are forbidden in automation.",
         )
+    return None
 
-    reason = find_ansible_shell_reason(path, text, before)
-    if reason:
-        return reason
-    reason = find_iac_sql_reason(path, text, before)
-    if reason:
-        return reason
-    reason = find_mutating_sql_file_reason(path, text, before)
-    if reason:
-        return reason
 
+def find_sql_and_task_write_reason(
+    path: str, text: str, before: str
+) -> str | None:
+    """Return deny reason for embedded SQL or unverified shell tasks."""
+    return (
+        find_ansible_shell_reason(path, text, before)
+        or find_iac_sql_reason(path, text, before)
+        or find_mutating_sql_file_reason(path, text, before)
+    )
+
+
+def find_planning_write_reason(
+    payload: dict[str, Any], state: dict[str, Any], path: str
+) -> str | None:
+    """Return deny reason for uninspected planning or manifest files."""
     manifest_status = load_manifest_status(payload)
     if manifest_status is not None:
         return find_missing_manifest_reason(
@@ -578,6 +577,36 @@ def find_write_deny_reason(
             path, inspect_planning_status(payload, state)
         )
     return None
+
+
+def find_write_deny_reason(
+    payload: dict[str, Any],
+    path: str,
+    text: str,
+    command: str,
+    before: str = "",
+) -> str | None:
+    """Return a deny reason for a forbidden write, or None to allow."""
+    state = load_state(payload)
+    if path and is_self_path(path):
+        return None
+
+    reason = find_guest_sql_command_reason(state, command)
+    if reason:
+        return reason
+
+    if command and not path:
+        return find_command_without_path_reason(payload, state, command)
+
+    if not path:
+        return None
+
+    return (
+        find_generic_module_write_reason(state, path, text, before)
+        or find_iac_policy_write_reason(path, text, before)
+        or find_sql_and_task_write_reason(path, text, before)
+        or find_planning_write_reason(payload, state, path)
+    )
 
 
 def is_governed_working_tree_file(
@@ -606,6 +635,79 @@ def is_governed_working_tree_file(
     return True
 
 
+def is_overwrite_tool(tool: str, is_append: bool) -> bool:
+    """Return True if tool performs whole-file replacement."""
+    if tool == "writetofile":
+        return True
+    return tool == "writefile" and not is_append
+
+
+def is_block_mutation_tool(tool: str, is_append: bool) -> bool:
+    """Return True if tool mutates content blocks or appends to a file."""
+    if tool in {"replacefilecontent", "multireplacefilecontent", "editfile"}:
+        return True
+    return tool == "writefile" and is_append
+
+
+def find_overwrite_deny_reason(
+    payload: dict[str, Any], path: str, tool: str
+) -> str | None:
+    """Return deny reason if overwrite lacks owner leave."""
+    latest_request = extract_latest_user_request(payload)
+    if ALLOW_FULL_OVERWRITE_RE.search(latest_request):
+        return None
+    tool_name = "write_file" if tool == "writefile" else "write_to_file"
+    alt_tools = (
+        "edit_file"
+        if tool == "writefile"
+        else "replace_file_content or multi_replace_file_content"
+    )
+    return (
+        "201_Execute_Act_Predicates.md § 201(d). Whole-file "
+        f"replacement via {tool_name} on existing working-tree "
+        f"path '{path}' is prohibited. Use {alt_tools}. To allow full "
+        "overwrite, the prompt in the current turn must contain "
+        "'allow full overwrite' (§ 201(e))."
+    )
+
+
+def find_hash_drift_reason(
+    path: str, candidate: Path, read_hashes: dict[str, str]
+) -> str | None:
+    """Return deny reason if on-disk hash differs from inspected hash."""
+    resolved_str = str(candidate.resolve())
+    current_hash = compute_file_sha256(candidate.resolve())
+    recorded_hash = read_hashes[resolved_str]
+    if current_hash != recorded_hash:
+        return (
+            "201_Execute_Act_Predicates.md § 201(c). Working-tree drift "
+            f"detected: current on-disk content hash of '{path}' does not "
+            "match the hash recorded during inspection in this session. "
+            "Re-inspect before mutation."
+        )
+    return None
+
+
+def find_read_before_write_reason(
+    payload: dict[str, Any], path: str, candidate: Path, tool: str
+) -> str | None:
+    """Return deny reason if path was not inspected before block mutation."""
+    state = load_state(payload)
+    read_hashes = state.get("read_hashes", {})
+    resolved_str = str(candidate.resolve())
+    if resolved_str not in read_hashes:
+        read_tool = (
+            "read_file" if tool in {"editfile", "writefile"} else "view_file"
+        )
+        return (
+            "201_Execute_Act_Predicates.md § 201(c). Read-before-write "
+            f"invariant: path '{path}' must be inspected in full with a "
+            f"read tool (e.g. {read_tool}) in the current session before "
+            "mutation."
+        )
+    return find_hash_drift_reason(path, candidate, read_hashes)
+
+
 def find_drift_gate_reason(payload: dict[str, Any], path: str) -> str | None:
     """Enforce working-tree drift and overwrite invariants (§ 201(c)(d)(e))."""
     if not path:
@@ -615,38 +717,13 @@ def find_drift_gate_reason(payload: dict[str, Any], path: str) -> str | None:
         return None
 
     tool = normalize_tool(payload)
-    resolved_str = str(candidate.resolve())
+    tool_input_data = extract_tool_input(payload)
+    is_append = bool(tool_input_data.get("Append"))
 
-    if tool == "writetofile":
-        latest_request = extract_latest_user_request(payload)
-        if not ALLOW_FULL_OVERWRITE_RE.search(latest_request):
-            return (
-                "201_Execute_Act_Predicates.md § 201(d). Whole-file "
-                f"replacement via write_to_file on existing working-tree "
-                f"path '{path}' is prohibited. Use replace_file_content or "
-                "multi_replace_file_content. To allow full overwrite, the "
-                "prompt in the current turn must contain 'allow full "
-                "overwrite' (§ 201(e))."
-            )
+    if is_overwrite_tool(tool, is_append):
+        return find_overwrite_deny_reason(payload, path, tool)
 
-    if tool in {"replacefilecontent", "multireplacefilecontent"}:
-        state = load_state(payload)
-        read_hashes = state.get("read_hashes", {})
-        if resolved_str not in read_hashes:
-            return (
-                "201_Execute_Act_Predicates.md § 201(c). Read-before-write "
-                f"invariant: path '{path}' must be inspected in full with a "
-                "read tool (e.g. view_file) in the current session before "
-                "mutation."
-            )
-        current_hash = compute_file_sha256(candidate.resolve())
-        recorded_hash = read_hashes[resolved_str]
-        if current_hash != recorded_hash:
-            return (
-                "201_Execute_Act_Predicates.md § 201(c). Working-tree drift "
-                f"detected: current on-disk content hash of '{path}' does not "
-                "match the hash recorded during inspection in this session. "
-                "Re-inspect before mutation."
-            )
+    if is_block_mutation_tool(tool, is_append):
+        return find_read_before_write_reason(payload, path, candidate, tool)
 
     return None

@@ -1,26 +1,60 @@
 ---
 include:
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/core@1.8.0
+  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/core@1.8.2
     inputs:
-      reviewer_image: $CI_REGISTRY/csning1998-lab/gitlab-ci-with-code-reviewer/reviewer:1.8.0
+      reviewer_image: $CI_REGISTRY/csning1998-lab/gitlab-ci-with-code-reviewer/reviewer:1.8.2
       review_models:
         - "claude-sonnet-5.5"
         - "claude-opus-5.5"
+        - "gemini-4-argon"
         - "gemini-3.8-flash"
         - "azure-gpt-5.4-mini"
       enable_sonarqube: true
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/iac-terraform@1.8.0
+  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/iac-terraform@1.8.2
     inputs:
       # CKV_GLB_1, CKV_GLB_3, CKV_GLB_4: require GitLab Premium/Ultimate merge request approval and push rules.
       # CKV_TF_1: enforces commit-pinned Git URLs; modules use immutable semantic versions from GitLab Terraform Registry.
       checkov_skip: "CKV_GLB_1,CKV_GLB_3,CKV_GLB_4,CKV_TF_1"
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/lang-python@1.8.0
+  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/lang-python@1.8.2
     inputs:
       package_manager: uv
       python_image: ghcr.io/astral-sh/uv:python3.11-alpine
       python_globs: ["hooks/**/*.py", "skills/**/*.py", "tests/**/*.py"]
-      python_test_cmd: pytest
+      python_test_cmd: >-
+        uv pip install pytest-cov --system &&
+        pytest --cov=hooks --cov=skills --cov-report=xml:coverage.xml --junitxml=junit.xml
       test_stage: test
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/auto-tag@1.8.0
+  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/auto-tag@1.8.2
     inputs:
-      reviewer_image: $CI_REGISTRY/csning1998-lab/gitlab-ci-with-code-reviewer/reviewer:1.8.0
+      reviewer_image: $CI_REGISTRY/csning1998-lab/gitlab-ci-with-code-reviewer/reviewer:1.8.2
+
+test:python:
+  artifacts:
+    when: always
+    paths:
+      - coverage.xml
+    reports:
+      junit:
+        - junit.xml
+
+# SonarQube analysis for Python/Terraform workspace replacing the catalog Go defaults.
+security:sonarqube:
+  needs:
+    - job: test:python
+      optional: true
+  variables:
+    SONAR_PYTHON_COVERAGE_REPORT_PATHS: coverage.xml
+  script:
+    - |
+      sonar-scanner \
+        -Dsonar.host.url="$SONAR_HOST_URL" \
+        -Dsonar.token="$SONAR_TOKEN" \
+        -Dsonar.projectKey="${SONAR_PROJECT_KEY:-$CI_PROJECT_PATH_SLUG}" \
+        -Dsonar.projectName="${SONAR_PROJECT_KEY:-$CI_PROJECT_PATH_SLUG}" \
+        -Dsonar.qualitygate.wait=true \
+        -Dsonar.sources=hooks,skills,terraform \
+        -Dsonar.tests=tests \
+        -Dsonar.test.inclusions="tests/test_*.py" \
+        -Dsonar.python.coverage.reportPaths="$SONAR_PYTHON_COVERAGE_REPORT_PATHS" \
+        -Dsonar.python.version=3.11,3.12,3.13,3.14 \
+        -Dsonar.exclusions="**/.terraform/**,**/__pycache__/**,**/.pytest_cache/**,**/.ruff_cache/**,coverage.xml"

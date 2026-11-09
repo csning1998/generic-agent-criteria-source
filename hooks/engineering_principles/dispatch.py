@@ -32,6 +32,15 @@ from engineering_principles.payload import normalize_tool
 from engineering_principles.state import is_hook_disabled
 from engineering_principles.state import load_state
 from engineering_principles.state import resolve_workspace_root
+from engineering_principles.tdd_gate import find_tdd_stop_block_reason
+from engineering_principles.tdd_gate import find_tdd_write_deny_reason
+from engineering_principles.tdd_gate import record_tdd_post_tool
+from engineering_principles.tdd_gate import record_tdd_prompt_authorization
+
+
+def is_antigravity_payload(payload: dict[str, Any]) -> bool:
+    """Return True if payload originates from an Antigravity harness."""
+    return bool(payload.get("conversationId") or payload.get("workspacePaths"))
 
 
 def deny(reason: str, exit_code: int = 2) -> int:
@@ -42,12 +51,13 @@ def deny(reason: str, exit_code: int = 2) -> int:
     return exit_code
 
 
-def block_stop(reason: str) -> int:
-    """Print a Stop block decision and return exit code 2."""
+def block_stop(reason: str, is_agy: bool = False) -> int:
+    """Print a Stop decision: continue for AGY (code 0) or block (code 2)."""
+    decision = "continue" if is_agy else "block"
     print(
-        json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False)
+        json.dumps({"decision": decision, "reason": reason}, ensure_ascii=False)
     )
-    return 2
+    return 0 if is_agy else 2
 
 
 def allow(extra: dict[str, Any] | None = None) -> int:
@@ -90,13 +100,18 @@ def _extract_module_scan_text(
         tool_input_data.get("content")
         or tool_input_data.get("contents")
         or tool_input_data.get("CodeContent")
+        or tool_input_data.get("Content")
     )
     content_str = content if isinstance(content, str) else ""
-    old_str = tool_input_data.get("old_string") or tool_input_data.get(
-        "TargetContent"
+    old_str = (
+        tool_input_data.get("old_string")
+        or tool_input_data.get("TargetContent")
+        or tool_input_data.get("Target")
     )
-    new_str = tool_input_data.get("new_string") or tool_input_data.get(
-        "ReplacementContent"
+    new_str = (
+        tool_input_data.get("new_string")
+        or tool_input_data.get("ReplacementContent")
+        or tool_input_data.get("Replacement")
     )
     base_text = derive_composed_module_text(
         content_str,
@@ -171,6 +186,10 @@ def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
         return deny(module_reason, exit_code=exit_code)
 
     text = extract_new_text(tool_input_data)
+    tdd_reason = find_tdd_write_deny_reason(payload, path, text)
+    if tdd_reason:
+        return deny(tdd_reason, exit_code=exit_code)
+
     before = load_old_text(tool_input_data, path)
     reason = find_write_deny_reason(
         payload, path, text, command_text, before=before
@@ -196,22 +215,28 @@ def intercept_post_tool_use(payload: dict[str, Any]) -> int:
         for item in resolve_skill_module_paths(path, command_text, cwd, root):
             record_skill_module_write(payload, item)
             emit_post_write_scan(item, root)
+    record_tdd_post_tool(payload, tool, path, command_text)
     return 0
 
 
 def intercept_stop(payload: dict[str, Any]) -> int:
-    """Block the turn when a written skill-module file still bakes state."""
+    """Block turn when statelessness or TDD requirements are not met."""
+    is_agy = is_antigravity_payload(payload)
     reason = find_stop_stateless_reason(payload)
     if reason:
-        return block_stop(reason)
+        return block_stop(reason, is_agy=is_agy)
+    tdd_reason = find_tdd_stop_block_reason(payload)
+    if tdd_reason:
+        return block_stop(tdd_reason, is_agy=is_agy)
     return 0
 
 
 def intercept_user_prompt(payload: dict[str, Any]) -> int:
-    """Record leave phrases. Inject no context."""
+    """Record leave phrases and green authorization. Inject no context."""
     prompt = extract_prompt_text(payload)
     if prompt:
         record_leave(payload, prompt)
+        record_tdd_prompt_authorization(payload, prompt)
     return 0
 
 

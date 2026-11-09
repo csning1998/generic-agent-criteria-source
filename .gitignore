@@ -55,6 +55,7 @@ hooks/state
 
 # Local Python lint, pytest, and SonarQube scan.
 !/pytest.sh
+!/sonar-project.properties
 !/merge-request.md
 
 # Personal workstation SELinux playbooks. Not consumed by Grok at runtime.

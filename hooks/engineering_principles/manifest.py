@@ -63,6 +63,57 @@ def _require_relative(value: object, field: str) -> str:
     return value
 
 
+def _extract_governed_dirs(
+    file: Path, data: dict[str, object]
+) -> tuple[str, ...]:
+    """Return validated governed_dirs from manifest data."""
+    raw_dirs = data.get("governed_dirs", list(DEFAULT_GOVERNED_DIRS))
+    if (
+        not isinstance(raw_dirs, list)
+        or not raw_dirs
+        or not all(isinstance(item, str) and item for item in raw_dirs)
+    ):
+        raise ManifestError(
+            f"{file}: governed_dirs must be a non-empty list of names"
+        )
+    return tuple(raw_dirs)
+
+
+def _load_single_specification(
+    file: Path, root: Path, workspace: Path, index: int, raw: object
+) -> Specification:
+    """Parse and validate a single specification entry."""
+    field = f"specifications[{index}]"
+    if not isinstance(raw, dict):
+        raise ManifestError(f"{file}: {field} must be a table")
+    path = root / _require_relative(raw.get("path"), f"{field}.path")
+    if not path.is_file():
+        raise ManifestError(f"{file}: {field}.path {path} is missing")
+    governs = raw.get("governs")
+    if not isinstance(governs, list) or not governs:
+        raise ManifestError(f"{file}: {field}.governs must be a list")
+    texts = tuple(
+        _require_relative(item, f"{field}.governs") for item in governs
+    )
+    return Specification(
+        path=path,
+        governs=tuple(workspace / item for item in texts),
+        governs_text=texts,
+    )
+
+
+def _load_specification_entries(
+    file: Path, root: Path, workspace: Path, raw_specs: object
+) -> tuple[Specification, ...]:
+    """Parse and validate specification entries list."""
+    if not isinstance(raw_specs, list) or not raw_specs:
+        raise ManifestError(f"{file}: specifications must be a non-empty list")
+    return tuple(
+        _load_single_specification(file, root, workspace, index, raw)
+        for index, raw in enumerate(raw_specs)
+    )
+
+
 def load_planning_manifest(file: Path) -> PlanningManifest:
     """Read and validate a manifest; every named file MUST exist."""
     try:
@@ -78,47 +129,17 @@ def load_planning_manifest(file: Path) -> PlanningManifest:
     )
     if not adjudication.is_file():
         raise ManifestError(f"{file}: adjudication {adjudication} is missing")
-    raw_dirs = data.get("governed_dirs", list(DEFAULT_GOVERNED_DIRS))
-    if (
-        not isinstance(raw_dirs, list)
-        or not raw_dirs
-        or not all(isinstance(item, str) and item for item in raw_dirs)
-    ):
-        raise ManifestError(
-            f"{file}: governed_dirs must be a non-empty list of names"
-        )
-    governed_dirs = tuple(raw_dirs)
-    raw_specs = data.get("specifications")
-    if not isinstance(raw_specs, list) or not raw_specs:
-        raise ManifestError(f"{file}: specifications must be a non-empty list")
-    specs: list[Specification] = []
-    for index, raw in enumerate(raw_specs):
-        field = f"specifications[{index}]"
-        if not isinstance(raw, dict):
-            raise ManifestError(f"{file}: {field} must be a table")
-        path = root / _require_relative(raw.get("path"), f"{field}.path")
-        if not path.is_file():
-            raise ManifestError(f"{file}: {field}.path {path} is missing")
-        governs = raw.get("governs")
-        if not isinstance(governs, list) or not governs:
-            raise ManifestError(f"{file}: {field}.governs must be a list")
-        texts = tuple(
-            _require_relative(item, f"{field}.governs") for item in governs
-        )
-        specs.append(
-            Specification(
-                path=path,
-                governs=tuple(workspace / item for item in texts),
-                governs_text=texts,
-            )
-        )
+    governed_dirs = _extract_governed_dirs(file, data)
+    specifications = _load_specification_entries(
+        file, root, workspace, data.get("specifications")
+    )
     return PlanningManifest(
         file=file,
         root=root,
         workspace=workspace,
         adjudication=adjudication,
         governed_dirs=governed_dirs,
-        specifications=tuple(specs),
+        specifications=specifications,
     )
 
 

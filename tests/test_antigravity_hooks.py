@@ -12,14 +12,25 @@ from engineering_principles.config import MUTATING_TOOLS
 from engineering_principles.config import READ_TOOLS
 from engineering_principles.dispatch import intercept_post_tool_use
 from engineering_principles.dispatch import intercept_pre_tool_use
+from engineering_principles.dispatch import intercept_stop
 from engineering_principles.payload import extract_command
 from engineering_principles.payload import extract_file_path
 from engineering_principles.payload import extract_new_text
+from engineering_principles.payload import extract_prompt_text
 from engineering_principles.payload import extract_tool_input
 from engineering_principles.payload import load_old_text
 from engineering_principles.payload import normalize_tool
 from engineering_principles.state import extract_session_id
+from engineering_principles.state import load_state
+from engineering_principles.state import persist_state
 from engineering_principles.state import resolve_workspace_root
+from engineering_principles.tdd_gate import find_tdd_stop_block_reason
+from engineering_principles.tdd_gate import find_tdd_write_deny_reason
+from engineering_principles.tdd_gate import is_scaffolding_only_text
+from engineering_principles.tdd_gate import is_tdd_production_path
+from engineering_principles.tdd_gate import is_tdd_test_path
+from engineering_principles.tdd_gate import record_tdd_post_tool
+from engineering_principles.tdd_gate import record_tdd_prompt_authorization
 
 
 def _agy_payload(
@@ -538,3 +549,602 @@ def test_main_pre_tool_use_exception_uses_resolved_exit_code(
     res = json.loads(captured.out)
     assert res.get("decision") == "deny"
     assert "hook error while evaluating a write" in res.get("reason", "")
+
+
+def test_config_antigravity2_tools_registered_in_tool_sets() -> None:
+    """AGY 2.0 tool names writefile, editfile in MUTATING, readfile in READ."""
+    assert {"writefile", "editfile"}.issubset(MUTATING_TOOLS)
+    assert "readfile" in READ_TOOLS
+
+
+def test_normalize_tool_read_file_returns_readfile() -> None:
+    """Normalize tool name read_file to readfile."""
+    payload = _agy_payload("read_file", {"Path": "/workspace/README.md"})
+    assert normalize_tool(payload) == "readfile"
+
+
+def test_extract_file_path_read_file_returns_path_field() -> None:
+    """Extract Path parameter from Antigravity 2.0 read_file tool input."""
+    payload = _agy_payload("read_file", {"Path": "/workspace/README.md"})
+    tool_input = extract_tool_input(payload)
+    assert extract_file_path(tool_input) == "/workspace/README.md"
+
+
+def test_extract_new_text_write_file_returns_content_field() -> None:
+    """Extract Content parameter from Antigravity 2.0 write_file tool input."""
+    payload = _agy_payload(
+        "write_file", {"Path": "/workspace/main.py", "Content": "print(1)\n"}
+    )
+    tool_input = extract_tool_input(payload)
+    assert extract_file_path(tool_input) == "/workspace/main.py"
+    assert extract_new_text(tool_input) == "print(1)\n"
+
+
+def test_extract_new_text_edit_file_returns_replacement_field() -> None:
+    """Extract Replacement parameter from edit_file tool input."""
+    payload = _agy_payload(
+        "edit_file",
+        {
+            "Path": "/workspace/main.py",
+            "Target": "old",
+            "Replacement": "new",
+        },
+    )
+    tool_input = extract_tool_input(payload)
+    assert extract_file_path(tool_input) == "/workspace/main.py"
+    assert extract_new_text(tool_input) == "new"
+    assert load_old_text(tool_input, "/workspace/main.py") == "old"
+
+
+@pytest.mark.parametrize(
+    ("raw_input", "expected_extracted"),
+    [
+        ("<USER_REQUEST>\n請更新檔案\n</USER_REQUEST>", "請更新檔案"),
+        (
+            "<USER_REQUEST>\nPlease update the file\n</USER_REQUEST>",
+            "Please update the file",
+        ),
+        (
+            "plain English prompt without tags",
+            "plain English prompt without tags",
+        ),
+    ],
+)
+def test_extract_prompt_text_last_user_input_returns_clean_request(
+    raw_input: str, expected_extracted: str
+) -> None:
+    """Extract lastUserInput from payload and strip tags in any language."""
+    payload = {"lastUserInput": raw_input}
+    assert extract_prompt_text(payload) == expected_extracted
+
+
+@pytest.mark.parametrize(
+    (
+        "scenario",
+        "file_exists",
+        "append_mode",
+        "requests",
+        "expected_decision",
+        "expected_reason_clause",
+    ),
+    [
+        (
+            "existing_without_phrase_denies",
+            True,
+            False,
+            ["Please update the file"],
+            "deny",
+            "201(d)",
+        ),
+        (
+            "existing_with_phrase_allows",
+            True,
+            False,
+            ["allow full overwrite on target.txt"],
+            "allow",
+            None,
+        ),
+        (
+            "brand_new_path_allows",
+            False,
+            False,
+            [],
+            "allow",
+            None,
+        ),
+    ],
+)
+def test_evaluate_write_file_overwrite_gate_enforces_verdict(
+    agy_workspace: Path,
+    tmp_path: Path,
+    scenario: str,
+    file_exists: bool,
+    append_mode: bool,
+    requests: list[str],
+    expected_decision: str,
+    expected_reason_clause: str | None,
+) -> None:
+    """Verify write_file overwrite gate policies (§ 201(d)/(e))."""
+    file = agy_workspace / "target.txt"
+    if file_exists:
+        file.write_text("initial content\n", encoding="utf-8")
+    transcript = tmp_path / "transcript.jsonl"
+    if requests:
+        _write_transcript(transcript, requests)
+    payload = _agy_payload(
+        "write_file",
+        {
+            "Path": str(file),
+            "Overwrite": True,
+            "Append": append_mode,
+            "Content": "new content\n",
+        },
+        workspace_paths=[str(agy_workspace)],
+        transcript_path=str(transcript),
+    )
+    _code, res = _run_pre_tool_use(payload)
+    assert res.get("decision") == expected_decision
+    if expected_reason_clause:
+        assert expected_reason_clause in res.get("reason", "")
+
+
+@pytest.mark.parametrize(
+    (
+        "scenario",
+        "read_mode",
+        "external_drift",
+        "expected_decision",
+        "expected_reason_clause",
+    ),
+    [
+        (
+            "uninspected_denies",
+            None,
+            False,
+            "deny",
+            "201(c)",
+        ),
+        (
+            "partial_read_with_byte_offset_denies",
+            "partial",
+            False,
+            "deny",
+            "201(c)",
+        ),
+        (
+            "full_read_clean_allows",
+            "full",
+            False,
+            "allow",
+            None,
+        ),
+        (
+            "full_read_with_external_drift_denies",
+            "full",
+            True,
+            "deny",
+            "201(c)",
+        ),
+    ],
+)
+def test_evaluate_edit_file_read_gate_enforces_verdict(
+    agy_workspace: Path,
+    scenario: str,
+    read_mode: str | None,
+    external_drift: bool,
+    expected_decision: str,
+    expected_reason_clause: str | None,
+) -> None:
+    """Verify edit_file read-before-write invariants (§ 201(c))."""
+    file = agy_workspace / "file.txt"
+    file.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+    if read_mode == "partial":
+        read_payload = _agy_payload(
+            "read_file",
+            {"Path": str(file), "ByteOffset": 10},
+            workspace_paths=[str(agy_workspace)],
+        )
+        intercept_post_tool_use(read_payload)
+    elif read_mode == "full":
+        read_payload = _agy_payload(
+            "read_file",
+            {"Path": str(file)},
+            workspace_paths=[str(agy_workspace)],
+        )
+        intercept_post_tool_use(read_payload)
+
+    if external_drift:
+        file.write_text("line 1 edited externally\n", encoding="utf-8")
+
+    edit_payload = _agy_payload(
+        "edit_file",
+        {
+            "Path": str(file),
+            "Target": "line 1",
+            "Replacement": "new 1",
+        },
+        workspace_paths=[str(agy_workspace)],
+    )
+    _code, res = _run_pre_tool_use(edit_payload)
+    assert res.get("decision") == expected_decision
+    if expected_reason_clause:
+        assert expected_reason_clause in res.get("reason", "")
+
+
+def test_evaluate_skill_module_stateless_edit_file_flags_violation(
+    agy_workspace: Path,
+) -> None:
+    """Deny stateful content when edit_file writes to a skill module."""
+    skill_dir = agy_workspace / "skills" / "skill-module-test" / "scripts"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    target = skill_dir / "tool.py"
+    target.write_text("pass\n", encoding="utf-8")
+
+    read_payload = _agy_payload(
+        "read_file",
+        {"Path": str(target)},
+        workspace_paths=[str(agy_workspace)],
+    )
+    intercept_post_tool_use(read_payload)
+
+    edit_payload = _agy_payload(
+        "edit_file",
+        {
+            "Path": str(target),
+            "Target": "pass",
+            "Replacement": "HOME = '/home/alice/data'\n",
+        },
+        workspace_paths=[str(agy_workspace)],
+    )
+    code, res = _run_pre_tool_use(edit_payload)
+    assert code == 0
+    assert res.get("decision") == "deny"
+    assert "a module MUST be stateless" in res.get("reason", "")
+
+
+def test_dispatch_intercept_stop_under_antigravity_returns_continue_decision(
+    agy_workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stop hook blocks under AGY with decision continue and exit code 0."""
+    skill_dir = agy_workspace / "skills" / "skill-module-test" / "scripts"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    target = skill_dir / "tool.py"
+    target.write_text("HOME = '/home/alice/data'\n", encoding="utf-8")
+
+    post_payload = _agy_payload(
+        "write_file",
+        {"Path": str(target), "Content": "HOME = '/home/alice/data'\n"},
+        workspace_paths=[str(agy_workspace)],
+    )
+    intercept_post_tool_use(post_payload)
+
+    stop_payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    code = intercept_stop(stop_payload)
+    assert code == 0
+    captured = capsys.readouterr()
+    res = json.loads(captured.out)
+    assert res.get("decision") == "continue"
+    assert "MUST be stateless" in res.get("reason", "")
+
+
+def test_is_tdd_test_path_matching_patterns_returns_true() -> None:
+    """Return True for test file paths matching TDD test patterns."""
+    assert is_tdd_test_path("tests/test_foo.py") is True
+    assert is_tdd_test_path("pkg/service_test.go") is True
+    assert is_tdd_test_path("src/components/button.test.ts") is True
+    assert is_tdd_test_path("src/components/button.spec.tsx") is True
+
+
+def test_is_tdd_test_path_non_matching_patterns_returns_false() -> None:
+    """Return False for production and configuration paths."""
+    assert is_tdd_test_path("src/components/button.tsx") is False
+    assert is_tdd_test_path("pkg/service.go") is False
+    assert is_tdd_test_path("lib/core.py") is False
+    assert is_tdd_test_path("pyproject.toml") is False
+
+
+def test_is_tdd_production_path_source_files_returns_true(
+    tmp_path: Path,
+) -> None:
+    """Return True for production source files under workspace."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    prod_file = workspace / "core.py"
+    prod_file.write_text("x = 1\n", encoding="utf-8")
+    assert is_tdd_production_path(str(prod_file), workspace) is True
+
+
+def test_is_tdd_production_path_test_and_doc_files_returns_false(
+    tmp_path: Path,
+) -> None:
+    """Return False for test files, doc files, and type definition files."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_file = workspace / "tests" / "test_core.py"
+    assert is_tdd_production_path(str(test_file), workspace) is False
+    doc_file = workspace / "README.md"
+    assert is_tdd_production_path(str(doc_file), workspace) is False
+    dts_file = workspace / "types.d.ts"
+    assert is_tdd_production_path(str(dts_file), workspace) is False
+
+
+def test_is_scaffolding_only_text_empty_stubs_returns_true() -> None:
+    """Return True for empty function stubs and type declarations."""
+    stub_python = "def compute_total(x: int) -> int:\n    pass\n"
+    assert is_scaffolding_only_text(stub_python) is True
+    stub_raises = (
+        "def compute_total(x: int) -> int:\n    raise NotImplementedError\n"
+    )
+    assert is_scaffolding_only_text(stub_raises) is True
+
+
+def test_is_scaffolding_only_text_business_logic_returns_false() -> None:
+    """Return False for control flow and algorithmic implementation."""
+    logic = (
+        "def compute_total(x: int) -> int:\n"
+        "    if x > 10:\n"
+        "        return x * 2\n"
+        "    return x\n"
+    )
+    assert is_scaffolding_only_text(logic) is False
+
+
+def test_find_tdd_write_deny_reason_red_pending_without_auth_denies_logic_write(
+    agy_workspace: Path,
+) -> None:
+    """Deny non-scaffolding writes when in red_pending_verification stage."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "red_pending_verification"
+    persist_state(payload, state)
+
+    prod_file = agy_workspace / "service.py"
+    prod_file.write_text("# existing\n", encoding="utf-8")
+    logic_code = "def calc():\n    return 42\n"
+    reason = find_tdd_write_deny_reason(payload, str(prod_file), logic_code)
+    assert reason is not None
+    assert "202(a)(1)" in reason
+
+
+def test_find_tdd_write_deny_reason_red_pending_allows_scaffolding_stub(
+    agy_workspace: Path,
+) -> None:
+    """Allow scaffolding stub writes in red_pending_verification stage."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "red_pending_verification"
+    persist_state(payload, state)
+
+    prod_file = agy_workspace / "service.py"
+    prod_file.write_text("# existing\n", encoding="utf-8")
+    stub_code = "def calc():\n    pass\n"
+    reason = find_tdd_write_deny_reason(payload, str(prod_file), stub_code)
+    assert reason is None
+
+
+def test_find_tdd_write_deny_reason_green_authorized_allows_logic_write(
+    agy_workspace: Path,
+) -> None:
+    """Allow business logic writes when stage is green_authorized."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "green_authorized"
+    persist_state(payload, state)
+
+    prod_file = agy_workspace / "service.py"
+    prod_file.write_text("# existing\n", encoding="utf-8")
+    logic_code = "def calc():\n    return 42\n"
+    reason = find_tdd_write_deny_reason(payload, str(prod_file), logic_code)
+    assert reason is None
+
+
+def test_find_tdd_stop_block_reason_red_pending_verification_blocks_stop(
+    agy_workspace: Path,
+) -> None:
+    """Block Stop when modified tests have not been executed."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "red_pending_verification"
+    state["tdd_modified_tests"] = ["tests/test_foo.py"]
+    persist_state(payload, state)
+
+    reason = find_tdd_stop_block_reason(payload)
+    assert reason is not None
+    assert "202(b)(1)" in reason
+
+
+def test_find_tdd_stop_block_reason_premature_green_execution_blocks_stop(
+    agy_workspace: Path,
+) -> None:
+    """Block Stop when tests pass without prior failure (premature green)."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "premature_green"
+    persist_state(payload, state)
+
+    reason = find_tdd_stop_block_reason(payload)
+    assert reason is not None
+    assert "202(b)(4)" in reason
+
+
+def test_find_tdd_stop_block_reason_red_verified_without_lint_blocks_stop(
+    agy_workspace: Path,
+) -> None:
+    """Block Stop when failing tests are verified but linter has not passed."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "red_verified"
+    state["tdd_lint_verified"] = False
+    persist_state(payload, state)
+
+    reason = find_tdd_stop_block_reason(payload)
+    assert reason is not None
+    assert "202(d)" in reason
+
+
+def test_find_tdd_stop_block_reason_red_verified_with_lint_returns_none(
+    agy_workspace: Path,
+) -> None:
+    """Allow Stop when tests failed with assertion and linter passed."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "red_verified"
+    state["tdd_lint_verified"] = True
+    persist_state(payload, state)
+
+    reason = find_tdd_stop_block_reason(payload)
+    assert reason is None
+
+
+def test_find_tdd_stop_block_reason_green_authorized_without_tests_blocks_stop(
+    agy_workspace: Path,
+) -> None:
+    """Block Stop in green stage when production mutated but tests unpassed."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_prod_mutated_in_green"] = True
+    state["tdd_tests_passed_in_green"] = False
+    persist_state(payload, state)
+
+    reason = find_tdd_stop_block_reason(payload)
+    assert reason is not None
+    assert "202(e)" in reason
+
+
+def test_find_tdd_stop_block_reason_green_with_tests_and_lint_returns_none(
+    agy_workspace: Path,
+) -> None:
+    """Allow Stop in green stage when both tests and linter passed."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_prod_mutated_in_green"] = True
+    state["tdd_tests_passed_in_green"] = True
+    state["tdd_lint_verified"] = True
+    persist_state(payload, state)
+
+    reason = find_tdd_stop_block_reason(payload)
+    assert reason is None
+
+
+def test_record_tdd_post_tool_test_mutation_transitions_stage_to_red_pending(
+    agy_workspace: Path,
+) -> None:
+    """Transition stage to red_pending when test file is mutated."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    record_tdd_post_tool(
+        payload, "editfile", str(agy_workspace / "tests/test_x.py"), ""
+    )
+    state = load_state(payload)
+    assert state.get("tdd_stage") == "red_pending_verification"
+    assert "tests/test_x.py" in str(state.get("tdd_modified_tests", []))
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "測試已經通過紅燈，可以轉綠",
+        "proceed to green",
+        "authorize green now",
+    ],
+)
+def test_record_tdd_prompt_authorization_green_phrase_advances_stage_to_green(
+    agy_workspace: Path,
+    phrase: str,
+) -> None:
+    """Advance tdd_stage to green_authorized on prompt authorization phrase."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "red_verified"
+    persist_state(payload, state)
+
+    record_tdd_prompt_authorization(payload, phrase)
+    updated = load_state(payload)
+    assert updated.get("tdd_stage") == "green_authorized"
+
+
+def test_is_scaffolding_only_text_docstring_with_keywords_returns_true() -> (
+    None
+):
+    """Docstrings containing control keywords remain valid scaffolding stubs."""
+    stub = (
+        "def calculate_tax(amount: int) -> int:\n"
+        '    """Compute tax for the given case and return amount."""\n'
+        "    pass\n"
+    )
+    assert is_scaffolding_only_text(stub) is True
+
+
+def test_find_tdd_write_deny_reason_premature_green_denies_logic_write(
+    agy_workspace: Path,
+) -> None:
+    """Deny non-scaffolding writes when in premature_green stage."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "premature_green"
+    persist_state(payload, state)
+
+    prod_file = agy_workspace / "service.py"
+    prod_file.write_text("# existing\n", encoding="utf-8")
+    logic_code = "def calc():\n    return 42\n"
+    reason = find_tdd_write_deny_reason(payload, str(prod_file), logic_code)
+    assert reason is not None
+    assert "202(a)(1)" in reason
+
+
+def test_record_tdd_green_stage_order_independent_completion(
+    agy_workspace: Path,
+) -> None:
+    """Linter before test runner also resets green stage to idle."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_prod_mutated_in_green"] = True
+    persist_state(payload, state)
+
+    # Linter runs first
+    record_tdd_post_tool(payload, "runcommand", "", "ruff check .")
+    mid_state = load_state(payload)
+    assert mid_state["tdd_stage"] == "green_authorized"
+    assert mid_state["tdd_lint_verified"] is True
+
+    # Test runner runs second
+    record_tdd_post_tool(payload, "runcommand", "", "pytest")
+    final_state = load_state(payload)
+    assert final_state["tdd_stage"] == "idle"
+    assert final_state["tdd_modified_tests"] == []
+
+
+def test_record_tdd_green_stage_requires_prod_mutation_before_idle(
+    agy_workspace: Path,
+) -> None:
+    """Tests and linter before prod mutation do not reset stage to idle."""
+    payload = _agy_payload("", {}, workspace_paths=[str(agy_workspace)])
+    state = load_state(payload)
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_prod_mutated_in_green"] = False
+    persist_state(payload, state)
+
+    record_tdd_post_tool(payload, "runcommand", "", "pytest")
+    record_tdd_post_tool(payload, "runcommand", "", "ruff check .")
+    updated = load_state(payload)
+    assert updated["tdd_stage"] == "green_authorized"
+
+
+def test_record_tdd_test_and_linter_failure_resets_pass_flags() -> None:
+    """Subsequent test or linter failure resets green verified flags."""
+    from engineering_principles.tdd_gate import record_tdd_linter
+    from engineering_principles.tdd_gate import record_tdd_test_runner
+
+    state = {
+        "tdd_stage": "green_authorized",
+        "tdd_tests_passed_in_green": True,
+        "tdd_lint_verified": True,
+    }
+    record_tdd_test_runner(state, "green_authorized", has_error=True)
+    assert state["tdd_tests_passed_in_green"] is False
+
+    record_tdd_linter(state, "green_authorized", has_error=True)
+    assert state["tdd_lint_verified"] is False

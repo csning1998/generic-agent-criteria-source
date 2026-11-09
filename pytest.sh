@@ -64,9 +64,11 @@ else
     {
         git ls-files -z --cached --others --exclude-standard -- hooks skills tests terraform sonar-project.properties .gitignore
         printf '%s\0' .git
-        if [ -e coverage.xml ]; then printf '%s\0' coverage.xml; fi
     } | tar -c --null --ignore-failed-read -T - | podman cp - "${scanner}:/usr/src" \
         || { podman rm -f "${scanner}" >/dev/null; exit 1; }
+    if [ -e coverage.xml ]; then
+        podman cp coverage.xml "${scanner}:/usr/src/coverage.xml" || { podman rm -f "${scanner}" >/dev/null; exit 1; }
+    fi
     scan_status=0
     podman start --attach "${scanner}" || scan_status=$?
     podman rm "${scanner}" >/dev/null

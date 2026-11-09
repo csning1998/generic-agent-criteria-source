@@ -46,12 +46,25 @@ def extract_tool_input(payload: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+USER_REQUEST_RE = re.compile(
+    r"<USER_REQUEST>(.*?)</USER_REQUEST>", re.DOTALL | re.IGNORECASE
+)
+
+
 def extract_prompt_text(payload: dict[str, Any]) -> str:
     """Return the owner prompt text when present."""
-    for key in ("prompt", "userPrompt", "user_prompt", "text"):
+    for key in (
+        "prompt",
+        "userPrompt",
+        "user_prompt",
+        "text",
+        "lastUserInput",
+        "last_user_input",
+    ):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value
+            match = USER_REQUEST_RE.search(value)
+            return match.group(1).strip() if match else value.strip()
     return ""
 
 
@@ -64,6 +77,7 @@ def extract_file_path(tool_input_data: dict[str, Any]) -> str:
         "notebook_path",
         "TargetFile",
         "AbsolutePath",
+        "Path",
     ):
         value = tool_input_data.get(key)
         if isinstance(value, str) and value.strip():
@@ -81,6 +95,8 @@ def extract_new_text(tool_input_data: dict[str, Any]) -> str:
         "command",
         "CodeContent",
         "ReplacementContent",
+        "Content",
+        "Replacement",
     ):
         value = tool_input_data.get(key)
         if isinstance(value, str):
@@ -128,7 +144,7 @@ def _load_file_within_limit(path: str) -> str:
 
 def load_old_text(tool_input_data: dict[str, Any], path: str) -> str:
     """Return prior file text, or empty when missing or oversized."""
-    for key in ("old_string", "TargetContent"):
+    for key in ("old_string", "TargetContent", "Target"):
         value = tool_input_data.get(key)
         if isinstance(value, str) and value:
             return value
@@ -151,11 +167,6 @@ def extract_command(tool_input_data: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value
     return ""
-
-
-USER_REQUEST_RE = re.compile(
-    r"<USER_REQUEST>(.*?)</USER_REQUEST>", re.DOTALL | re.IGNORECASE
-)
 
 
 def _extract_event_content(event: dict[str, Any]) -> str:

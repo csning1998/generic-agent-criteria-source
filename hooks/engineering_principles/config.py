@@ -126,8 +126,10 @@ MUTATING_TOOLS = {
     "runterminalcommand",
     "bash",
     "writetofile",
+    "writefile",
     "replacefilecontent",
     "multireplacefilecontent",
+    "editfile",
     "runcommand",
 }
 READ_TOOLS = {"readfile", "read", "viewfile"}

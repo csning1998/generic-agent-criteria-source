@@ -84,6 +84,11 @@ def derive_empty_state(payload: dict[str, Any]) -> dict[str, Any]:
         "guest_sql_leave": False,
         "last_prompt": "",
         "skill_module_writes": [],
+        "tdd_stage": "idle",
+        "tdd_modified_tests": [],
+        "tdd_lint_verified": False,
+        "tdd_tests_passed_in_green": False,
+        "tdd_prod_mutated_in_green": False,
     }
 
 
@@ -108,6 +113,8 @@ def load_state(payload: dict[str, Any]) -> dict[str, Any]:
         merged["generic_leave_modules"] = []
     if not isinstance(merged.get("skill_module_writes"), list):
         merged["skill_module_writes"] = []
+    if not isinstance(merged.get("tdd_modified_tests"), list):
+        merged["tdd_modified_tests"] = []
     return merged
 
 

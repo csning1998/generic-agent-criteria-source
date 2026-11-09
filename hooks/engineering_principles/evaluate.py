@@ -86,6 +86,7 @@ def record_read(payload: dict[str, Any], path: str) -> dict[str, Any]:
         tool_input_data.get("StartLine")
         or tool_input_data.get("EndLine")
         or tool_input_data.get("ContentOffset")
+        or tool_input_data.get("ByteOffset")
     )
     candidate = Path(path).expanduser()
     if not is_partial and candidate.is_file():
@@ -616,27 +617,43 @@ def find_drift_gate_reason(payload: dict[str, Any], path: str) -> str | None:
 
     tool = normalize_tool(payload)
     resolved_str = str(candidate.resolve())
+    tool_input_data = extract_tool_input(payload)
+    is_append = bool(tool_input_data.get("Append"))
 
-    if tool == "writetofile":
+    if tool == "writetofile" or (tool == "writefile" and not is_append):
         latest_request = extract_latest_user_request(payload)
         if not ALLOW_FULL_OVERWRITE_RE.search(latest_request):
+            tool_name = "write_file" if tool == "writefile" else "write_to_file"
+            alt_tools = (
+                "edit_file"
+                if tool == "writefile"
+                else "replace_file_content or multi_replace_file_content"
+            )
             return (
                 "201_Execute_Act_Predicates.md § 201(d). Whole-file "
-                f"replacement via write_to_file on existing working-tree "
-                f"path '{path}' is prohibited. Use replace_file_content or "
-                "multi_replace_file_content. To allow full overwrite, the "
-                "prompt in the current turn must contain 'allow full "
-                "overwrite' (§ 201(e))."
+                f"replacement via {tool_name} on existing working-tree "
+                f"path '{path}' is prohibited. Use {alt_tools}. To allow full "
+                "overwrite, the prompt in the current turn must contain "
+                "'allow full overwrite' (§ 201(e))."
             )
 
-    if tool in {"replacefilecontent", "multireplacefilecontent"}:
+    if tool in {
+        "replacefilecontent",
+        "multireplacefilecontent",
+        "editfile",
+    } or (tool == "writefile" and is_append):
         state = load_state(payload)
         read_hashes = state.get("read_hashes", {})
         if resolved_str not in read_hashes:
+            read_tool = (
+                "read_file"
+                if tool in {"editfile", "writefile"}
+                else "view_file"
+            )
             return (
                 "201_Execute_Act_Predicates.md § 201(c). Read-before-write "
                 f"invariant: path '{path}' must be inspected in full with a "
-                "read tool (e.g. view_file) in the current session before "
+                f"read tool (e.g. {read_tool}) in the current session before "
                 "mutation."
             )
         current_hash = compute_file_sha256(candidate.resolve())

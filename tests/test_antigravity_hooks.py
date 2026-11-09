@@ -792,7 +792,7 @@ def test_evaluate_skill_module_stateless_edit_file_flags_violation(
         {
             "Path": str(target),
             "Target": "pass",
-            "Replacement": "SECRET_KEY = 'secret-hardcoded'\n",
+            "Replacement": "HOME = '/home/alice/data'\n",
         },
         workspace_paths=[str(agy_workspace)],
     )
@@ -810,11 +810,11 @@ def test_dispatch_intercept_stop_under_antigravity_returns_continue_decision(
     skill_dir = agy_workspace / "skills" / "skill-module-test" / "scripts"
     skill_dir.mkdir(parents=True, exist_ok=True)
     target = skill_dir / "tool.py"
-    target.write_text("API_KEY = 'hardcoded'\n", encoding="utf-8")
+    target.write_text("HOME = '/home/alice/data'\n", encoding="utf-8")
 
     post_payload = _agy_payload(
         "write_file",
-        {"Path": str(target), "Content": "API_KEY = 'hardcoded'\n"},
+        {"Path": str(target), "Content": "HOME = '/home/alice/data'\n"},
         workspace_paths=[str(agy_workspace)],
     )
     intercept_post_tool_use(post_payload)
@@ -825,7 +825,7 @@ def test_dispatch_intercept_stop_under_antigravity_returns_continue_decision(
     captured = capsys.readouterr()
     res = json.loads(captured.out)
     assert res.get("decision") == "continue"
-    assert "must remain stateless" in res.get("reason", "")
+    assert "MUST be stateless" in res.get("reason", "")
 
 
 def test_is_tdd_test_path_matching_patterns_returns_true() -> None:

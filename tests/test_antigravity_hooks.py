@@ -1872,3 +1872,20 @@ def test_stop_reconciles_late_flushed_transcript_command_failure(
     }
     assert find_tdd_stop_block_reason(stop_payload) is None
     assert load_state(stop_payload)["tdd_stage"] == "red_verified"
+
+
+def test_record_tdd_command_ruff_format_failure_keeps_red_pending() -> None:
+    """Format-check failure alone in chained cmd must not verify red tests."""
+    from engineering_principles.tdd_gate import record_tdd_command
+
+    state = {"tdd_stage": "red_pending_verification", "tdd_lint_verified": True}
+    changed = record_tdd_command(
+        state,
+        "uv run ruff format --check . && uv run pytest",
+        True,
+        "red_pending_verification",
+        output_text="1 file would be reformatted\n",
+    )
+    assert changed is True
+    assert state["tdd_lint_verified"] is False
+    assert state["tdd_stage"] == "red_pending_verification"

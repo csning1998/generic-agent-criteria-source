@@ -138,7 +138,8 @@ TEST_RUNNER_CMD_RE = re.compile(
     r"\b(py\.?test|(?:bun(?:\s+run)?|npm|go)\s+test|npx\s+(?:vitest|jest))\b"
 )
 LINTER_CMD_RE = re.compile(
-    r"\b(ruff\s+check|eslint|tsc|ng\s+lint|golangci-lint|bun\s+run\s+(?:lint|check|build))\b"
+    r"\b(ruff\s+(?:check|format)|eslint|tsc|ng\s+lint|golangci-lint|"
+    r"bun\s+run\s+(?:lint|check|build))\b"
 )
 COMPOSITE_VERIFY_CMD_RE = re.compile(r"(?:^|[;&|/\s])pytest\.sh\b")
 STOP_BYPASS_TERMINATION_REASONS = frozenset(

@@ -280,7 +280,11 @@ def _inspect_failure_component(output_text: str) -> str:
         )
     )
     has_lint_fail = bool(
-        re.search(r"Found \d+ error|\b[EWFD]\d{3,4}\s", output_text)
+        re.search(
+            r"Found \d+ error|\b[EWFD]\d{3,4}\s|"
+            r"\b\d+\s+files?\s+would be reformatted|would reformat",
+            output_text,
+        )
     )
     if has_lint_fail and not has_test_fail:
         return "lint_failed"

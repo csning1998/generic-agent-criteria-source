@@ -31,7 +31,12 @@ include:
     inputs:
       reviewer_image: $CI_REGISTRY/$CI_PROJECT_ROOT_NAMESPACE/gitlab-ci-with-code-reviewer/reviewer:1.8.3
 
+# The coverage run ignores python_globs because security:sonarqube reads coverage.xml on every merge request.
 test:python:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+    - if: "$CI_COMMIT_TAG"
   artifacts:
     when: always
     paths:
@@ -44,7 +49,6 @@ test:python:
 security:sonarqube:
   needs:
     - job: test:python
-      optional: true
   variables:
     SONAR_PYTHON_COVERAGE_REPORT_PATHS: coverage.xml
   script:

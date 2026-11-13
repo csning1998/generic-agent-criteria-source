@@ -366,28 +366,46 @@ def _record_pending_command(
     return True
 
 
+def _reconcile_pending_pre_stage(
+    state: dict[str, Any],
+    item: dict[str, Any],
+    has_test: bool,
+    has_lint: bool,
+) -> str:
+    """Restore affected optimistic flags from item and return eval stage."""
+    pre_stage = str(item.get("pre_stage") or state.get("tdd_stage") or "idle")
+    is_red = pre_stage in {
+        "red_pending_verification",
+        "red_verified",
+        "premature_green",
+    }
+    is_green = pre_stage == "green_authorized" and bool(
+        state.get("tdd_prod_mutated_in_green")
+    )
+    if not is_red and not is_green:
+        return str(state.get("tdd_stage") or "idle")
+
+    if has_lint:
+        state["tdd_lint_verified"] = bool(item.get("pre_lint_verified"))
+    if is_red:
+        if has_test:
+            state["tdd_stage"] = pre_stage
+        return str(state.get("tdd_stage") or pre_stage)
+
+    state["tdd_stage"] = "green_authorized"
+    if has_test:
+        state["tdd_tests_passed_in_green"] = bool(
+            item.get("pre_tests_passed_in_green")
+        )
+    return "green_authorized"
+
+
 def _record_pending_command_failure(
     state: dict[str, Any], item: dict[str, Any], cmd: str, output_text: str
 ) -> None:
     """Apply a reconciled failing TDD command against recorded pre-stage."""
-    pre_stage = str(item.get("pre_stage") or state.get("tdd_stage") or "idle")
-    if pre_stage in {
-        "red_pending_verification",
-        "red_verified",
-        "premature_green",
-    }:
-        eval_stage = pre_stage
-    elif pre_stage == "green_authorized" and state.get(
-        "tdd_prod_mutated_in_green"
-    ):
-        state["tdd_stage"] = "green_authorized"
-        state["tdd_tests_passed_in_green"] = bool(
-            item.get("pre_tests_passed_in_green")
-        )
-        state["tdd_lint_verified"] = bool(item.get("pre_lint_verified"))
-        eval_stage = "green_authorized"
-    else:
-        eval_stage = str(state.get("tdd_stage") or "idle")
+    has_test, has_lint = _derive_tdd_command_flags(cmd)
+    eval_stage = _reconcile_pending_pre_stage(state, item, has_test, has_lint)
     record_tdd_command(state, cmd, True, eval_stage, output_text=output_text)
 
 

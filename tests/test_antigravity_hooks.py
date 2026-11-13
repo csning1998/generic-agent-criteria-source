@@ -1889,6 +1889,67 @@ def test_stop_reconciles_late_flushed_transcript_command_failure(
     assert load_state(stop_payload)["tdd_stage"] == "red_verified"
 
 
+@pytest.mark.parametrize(
+    ("command", "output_text", "pre_lint", "want_stage", "want_lint"),
+    [
+        (
+            "uv run ruff format --check . && uv run pytest",
+            "1 file would be reformatted\n",
+            True,
+            "red_pending_verification",
+            False,
+        ),
+        (
+            "uv run pytest && uv run ruff check .",
+            "1 failed\n",
+            False,
+            "red_verified",
+            False,
+        ),
+    ],
+)
+def test_pending_red_failure_reverts_optimistic_flags_of_unrun_component(
+    command: str,
+    output_text: str,
+    pre_lint: bool,
+    want_stage: str,
+    want_lint: bool,
+) -> None:
+    """A late failure restores the flags the optimistic pass set unrun."""
+    from engineering_principles.tdd_gate import _record_pending_command_failure
+
+    state = {"tdd_stage": "premature_green", "tdd_lint_verified": True}
+    item = {
+        "command": command,
+        "pre_stage": "red_pending_verification",
+        "pre_lint_verified": pre_lint,
+    }
+    _record_pending_command_failure(state, item, command, output_text)
+    assert state["tdd_stage"] == want_stage
+    assert state["tdd_lint_verified"] is want_lint
+
+
+def test_pending_green_test_failure_keeps_later_lint_pass() -> None:
+    """A late test failure in green leaves a later linter pass intact."""
+    from engineering_principles.tdd_gate import _record_pending_command_failure
+
+    state = {
+        "tdd_stage": "green_authorized",
+        "tdd_prod_mutated_in_green": True,
+        "tdd_tests_passed_in_green": True,
+        "tdd_lint_verified": True,
+    }
+    item = {
+        "command": "uv run pytest",
+        "pre_stage": "green_authorized",
+        "pre_tests_passed_in_green": False,
+        "pre_lint_verified": False,
+    }
+    _record_pending_command_failure(state, item, "uv run pytest", "1 failed\n")
+    assert state["tdd_tests_passed_in_green"] is False
+    assert state["tdd_lint_verified"] is True
+
+
 def test_record_tdd_command_ruff_format_failure_keeps_red_pending() -> None:
     """Format-check failure alone in chained cmd must not verify red tests."""
     from engineering_principles.tdd_gate import record_tdd_command

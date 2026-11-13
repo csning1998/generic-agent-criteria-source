@@ -411,24 +411,58 @@ def test_is_cursor_harness_ignores_relative_argv(
 
 
 def test_resolve_state_directory_uses_cursor_tree_when_unoverridden(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """An unset STATE_DIR follows the materialized adapter, not argv."""
     monkeypatch.setattr(gate_check, "STATE_DIR", None)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
     monkeypatch.setattr(sys, "argv", ["hooks/gate-check.py"])
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.cursor/hooks/gate-check.py"
     )
-    uid = os.getuid()
-    assert gate_check.resolve_state_directory() == Path(
-        f"/tmp/cursor-gate-state-{uid}"
+    assert (
+        gate_check.resolve_state_directory()
+        == tmp_path / "runtime" / "cursor-gate-state"
     )
     monkeypatch.setattr(
         gate_check, "__file__", "/tmp/home/.claude/hooks/gate-check.py"
     )
-    assert gate_check.resolve_state_directory() == Path(
-        f"/tmp/claude-gate-state-{uid}"
+    assert (
+        gate_check.resolve_state_directory()
+        == tmp_path / "runtime" / "claude-gate-state"
     )
+
+
+@pytest.mark.parametrize("module", [gate_check, post_write_review])
+def test_resolve_state_directory_falls_back_to_cache_without_runtime_dir(
+    module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing XDG_RUNTIME_DIR selects XDG_CACHE_HOME instead of /tmp."""
+    monkeypatch.setattr(module, "STATE_DIR", None)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        module, "__file__", "/tmp/home/.claude/hooks/gate-check.py"
+    )
+    assert (
+        module.resolve_state_directory()
+        == tmp_path / "cache" / "claude-gate-state"
+    )
+
+
+@pytest.mark.parametrize("module", [gate_check, post_write_review])
+def test_record_surfaced_scenario_rejects_state_root_of_another_user(
+    module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A state root owned by another UID never accepts a marker."""
+    root = tmp_path / "gate-state"
+    root.mkdir(mode=0o700)
+    monkeypatch.setattr(module, "STATE_DIR", root)
+    real_uid = os.getuid()
+    monkeypatch.setattr(module.os, "getuid", lambda: real_uid + 1)
+    with pytest.raises(PermissionError):
+        module.record_surfaced_scenario("session-1", "markdown")
+    assert not (root / "session-1").exists()
 
 
 @pytest.fixture
@@ -598,18 +632,19 @@ def test_post_write_surfaces_scenario_load_on_clean_cursor_write(
 
 
 def test_resolve_state_directory_follows_cursor_hooks_path(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Unset post-write STATE_DIR follows the Cursor materialized path."""
     monkeypatch.setattr(post_write_review, "STATE_DIR", None)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
     monkeypatch.setattr(
         post_write_review,
         "__file__",
         "/tmp/home/.cursor/hooks/post-write-review.py",
     )
-    uid = os.getuid()
-    assert post_write_review.resolve_state_directory() == Path(
-        f"/tmp/cursor-gate-state-{uid}"
+    assert (
+        post_write_review.resolve_state_directory()
+        == tmp_path / "runtime" / "cursor-gate-state"
     )
 
 

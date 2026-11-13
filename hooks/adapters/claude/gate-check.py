@@ -154,7 +154,30 @@ def resolve_state_directory() -> Path:
     if STATE_DIR is not None:
         return STATE_DIR
     harness = "cursor" if is_cursor_harness() else "claude"
-    return Path(f"/tmp/{harness}-gate-state-{os.getuid()}")
+    return _resolve_private_base() / f"{harness}-gate-state"
+
+
+def _resolve_private_base() -> Path:
+    """Return XDG_RUNTIME_DIR, or the user cache directory without it."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime)
+    cache = os.environ.get("XDG_CACHE_HOME")
+    return Path(cache) if cache else Path.home() / ".cache"
+
+
+def _provision_private_dir(path: Path) -> None:
+    """Make path a real 0o700 directory owned by the current user.
+
+    Discards a pre-existing symlink or non-directory entry. Raises
+    PermissionError for a directory of another user.
+    """
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        path.unlink()
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.lstat().st_uid != os.getuid():
+        raise PermissionError(f"{path} belongs to another user.")
+    os.chmod(path, 0o700)
 
 
 def resolve_marker_path(session_id: str, scenario_id: str) -> Path:
@@ -169,10 +192,12 @@ def is_scenario_surfaced(session_id: str, scenario_id: str) -> bool:
 
 def record_surfaced_scenario(session_id: str, scenario_id: str) -> None:
     """Record that scenario_id has been surfaced this session."""
-    path = resolve_marker_path(session_id, scenario_id)
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path.parent, 0o700)
-    path.touch(mode=0o600, exist_ok=True)
+    root = resolve_state_directory()
+    _provision_private_dir(root)
+    _provision_private_dir(root / session_id)
+    resolve_marker_path(session_id, scenario_id).touch(
+        mode=0o600, exist_ok=True
+    )
 
 
 def load_transcript_events(transcript_path: str) -> list[dict]:

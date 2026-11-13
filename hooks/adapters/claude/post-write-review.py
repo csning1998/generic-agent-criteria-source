@@ -46,7 +46,7 @@ COMMA_SO_PATTERN = re.compile(r"^\s*(?:#|//).*,\s*so\b", re.IGNORECASE)
 # the connector match. Hyphenated forms such as "so-called" stay outside
 # this pattern.
 BARE_SO_PATTERN = re.compile(
-    r"(?:#|//).*\s+so\s+",
+    r"(?:#|//).*(?<=\s)so(?=\s)",
     re.IGNORECASE,
 )
 # Flags a contrast clause for the 401(d) Defensive Fluff Versus Guardrail
@@ -78,7 +78,7 @@ REMINDER = "REMINDER"
 
 # A genitive 's reads as colloquial in this register regardless of the
 # attached noun, per 401(f) Prohibition of Colloquialisms.
-POSSESSIVE_APOSTROPHE_PATTERN = re.compile(r"(?:#|//).*\w+'s\b")
+POSSESSIVE_APOSTROPHE_PATTERN = re.compile(r"(?:#|//).*\w's\b")
 WHICH_WORD_PATTERN = re.compile(r"\bwhich\b", re.IGNORECASE)
 THAT_WORD_PATTERN = re.compile(r"\bthat\b", re.IGNORECASE)
 
@@ -174,7 +174,16 @@ def resolve_state_directory() -> Path:
     if STATE_DIR is not None:
         return STATE_DIR
     harness = "cursor" if is_cursor_harness() else "claude"
-    return Path(f"/tmp/{harness}-gate-state-{os.getuid()}")
+    return _resolve_private_base() / f"{harness}-gate-state"
+
+
+def _resolve_private_base() -> Path:
+    """Return XDG_RUNTIME_DIR, or the user cache directory without it."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime)
+    cache = os.environ.get("XDG_CACHE_HOME")
+    return Path(cache) if cache else Path.home() / ".cache"
 
 
 def resolve_marker_path(session_id: str, scenario_id: str) -> Path:
@@ -192,14 +201,16 @@ def is_scenario_surfaced(session_id: str, scenario_id: str) -> bool:
 
 
 def _provision_private_dir(path: Path) -> None:
-    """Make path a real 0o700 directory.
+    """Make path a real 0o700 directory owned by the current user.
 
-    Discards a pre-existing symlink or non-directory entry a predictable
-    /tmp path could have collected.
+    Discards a pre-existing symlink or non-directory entry. Raises
+    PermissionError for a directory of another user.
     """
     if path.is_symlink() or (path.exists() and not path.is_dir()):
         path.unlink()
-    path.mkdir(mode=0o700, exist_ok=True)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.lstat().st_uid != os.getuid():
+        raise PermissionError(f"{path} belongs to another user.")
     os.chmod(path, 0o700)
 
 

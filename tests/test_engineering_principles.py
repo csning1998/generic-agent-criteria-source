@@ -342,9 +342,7 @@ def test_mutating_sql_file_allows_comments_and_non_sql_ops(
         "psql -c 'select 1'\n"
     )
     script = workspace / "meta-platform/scripts/cleanup.sh"
-    assert (
-        find_write_deny_reason(payload, str(script), shell_text, "") is None
-    )
+    assert find_write_deny_reason(payload, str(script), shell_text, "") is None
 
     sql_text = (
         "-- ALTER USER postgres PASSWORD 'foo'\n"
@@ -402,10 +400,7 @@ def test_mutating_sql_file_cites_only_psql_line_not_echo_above(
     """Contextual grant matching cites only the psql line, not prose above."""
     payload = _payload(workspace)
     script = workspace / "meta-platform/scripts/grant-check.sh"
-    body = (
-        "echo 'grant access to reader'\n"
-        "psql -c 'grant admin to bob'\n"
-    )
+    body = "echo 'grant access to reader'\npsql -c 'grant admin to bob'\n"
     reason = find_write_deny_reason(payload, str(script), body, "") or ""
     assert "Section 3 Item A.5 lines 2." in reason
 

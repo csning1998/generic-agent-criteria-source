@@ -51,9 +51,7 @@ _SQL_PRIV = (
     r"CREATE|CONNECT|TEMPORARY|TEMP|EXECUTE|USAGE|MAINTAIN|"
     r"ALTER\s+SYSTEM)(?:\s*\([^)]+\))?"
 )
-_PREPOSITION_STOP = (
-    r"(?:for|in|of|from|to|with|on|by|at|as|and|or|the|a|an|if)"
-)
+_PREPOSITION_STOP = r"(?:for|in|of|from|to|with|on|by|at|as|and|or|the|a|an|if)"
 MUTATING_SQL_RE = re.compile(
     r"("
     r"\bALTER\s+(?:USER|ROLE)\b"

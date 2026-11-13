@@ -7,8 +7,11 @@ import sys
 import traceback
 from typing import Any
 
+from engineering_principles.config import GREEN_AUTH_RE
+from engineering_principles.config import MAX_STOP_CONTINUATIONS
 from engineering_principles.config import MUTATING_TOOLS
 from engineering_principles.config import READ_TOOLS
+from engineering_principles.config import STOP_BYPASS_TERMINATION_REASONS
 from engineering_principles.evaluate import find_drift_gate_reason
 from engineering_principles.evaluate import find_write_deny_reason
 from engineering_principles.evaluate import record_leave
@@ -26,11 +29,13 @@ from engineering_principles.payload import extract_file_path
 from engineering_principles.payload import extract_new_text
 from engineering_principles.payload import extract_prompt_text
 from engineering_principles.payload import extract_tool_input
+from engineering_principles.payload import load_latest_user_request_record
 from engineering_principles.payload import load_old_text
 from engineering_principles.payload import normalize_event
 from engineering_principles.payload import normalize_tool
 from engineering_principles.state import is_hook_disabled
 from engineering_principles.state import load_state
+from engineering_principles.state import persist_state
 from engineering_principles.state import resolve_workspace_root
 from engineering_principles.tdd_gate import find_tdd_stop_block_reason
 from engineering_principles.tdd_gate import find_tdd_write_deny_reason
@@ -150,6 +155,47 @@ def _find_module_stateless_violation(
     return None
 
 
+def _extract_nested_texts(value: Any) -> list[str]:
+    """Collect string leaves recursively from dicts and lists."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        items: list[str] = []
+        for child in value.values():
+            items.extend(_extract_nested_texts(child))
+        return items
+    if isinstance(value, list):
+        items = []
+        for child in value:
+            items.extend(_extract_nested_texts(child))
+        return items
+    return []
+
+
+def find_ask_question_deny_reason(payload: dict[str, Any]) -> str | None:
+    """Block ask_question attempts to solicit or substitute green auth."""
+    if normalize_tool(payload) != "askquestion":
+        return None
+    state = load_state(payload)
+    stage = str(state.get("tdd_stage") or "idle")
+    if stage not in {
+        "red_pending_verification",
+        "red_verified",
+        "premature_green",
+    }:
+        return None
+    combined = "\n".join(_extract_nested_texts(extract_tool_input(payload)))
+    if not combined:
+        return None
+    if "授權轉綠" in combined or GREEN_AUTH_RE.search(combined):
+        return (
+            "TDD gate (§ 202): ask_question MUST NOT solicit or substitute "
+            "for green authorization. Present failing red test output in "
+            "response prose and wait for explicit chat authorization."
+        )
+    return None
+
+
 def _resolve_pre_tool_exit_code(payload: dict[str, Any]) -> int:
     """Return 0 for Antigravity payloads and 2 for standard harnesses."""
     is_agy = bool(
@@ -166,6 +212,10 @@ def intercept_pre_tool_use(payload: dict[str, Any]) -> int:
     if tool in READ_TOOLS and path:
         record_read(payload, path)
         return allow()
+
+    ask_deny = find_ask_question_deny_reason(payload)
+    if ask_deny:
+        return deny(ask_deny, exit_code=_resolve_pre_tool_exit_code(payload))
 
     if tool not in MUTATING_TOOLS:
         return allow()
@@ -219,24 +269,77 @@ def intercept_post_tool_use(payload: dict[str, Any]) -> int:
     return 0
 
 
+def _clear_stop_loop_state(payload: dict[str, Any]) -> None:
+    """Clear Stop continuation loop counters when a turn finishes or clears."""
+    state = load_state(payload)
+    if state.get("stop_block_count") or state.get("last_stop_block_reason"):
+        state["stop_block_count"] = 0
+        state["last_stop_block_reason"] = ""
+        persist_state(payload, state)
+
+
 def intercept_stop(payload: dict[str, Any]) -> int:
     """Block turn when statelessness or TDD requirements are not met."""
+    termination_reason = str(payload.get("terminationReason") or "").strip()
+    if termination_reason in STOP_BYPASS_TERMINATION_REASONS or (
+        bool(termination_reason) and termination_reason != "NO_TOOL_CALL"
+    ):
+        _clear_stop_loop_state(payload)
+        return 0
+
     is_agy = is_antigravity_payload(payload)
-    reason = find_stop_stateless_reason(payload)
-    if reason:
-        return block_stop(reason, is_agy=is_agy)
-    tdd_reason = find_tdd_stop_block_reason(payload)
-    if tdd_reason:
-        return block_stop(tdd_reason, is_agy=is_agy)
-    return 0
+    reason = find_stop_stateless_reason(payload) or find_tdd_stop_block_reason(
+        payload
+    )
+    if not reason:
+        _clear_stop_loop_state(payload)
+        return 0
+
+    state = load_state(payload)
+    _prompt, turn_key = load_latest_user_request_record(payload)
+    if turn_key and turn_key != state.get("last_stop_turn_key"):
+        state["stop_block_count"] = 0
+        state["last_stop_block_reason"] = ""
+        state["last_stop_turn_key"] = turn_key
+    continuation_active = bool(
+        payload.get("continuationActive") or payload.get("stop_hook_active")
+    )
+    block_count = int(state.get("stop_block_count") or 0)
+    same_reason_repeat = continuation_active and (
+        reason == state.get("last_stop_block_reason")
+    )
+    if same_reason_repeat or block_count >= MAX_STOP_CONTINUATIONS:
+        return 0
+
+    state["stop_block_count"] = block_count + 1
+    state["last_stop_block_reason"] = reason
+    if turn_key:
+        state["last_stop_turn_key"] = turn_key
+    persist_state(payload, state)
+    return block_stop(reason, is_agy=is_agy)
 
 
 def intercept_user_prompt(payload: dict[str, Any]) -> int:
-    """Record leave phrases and green authorization. Inject no context."""
-    prompt = extract_prompt_text(payload)
+    """Record leave phrases, auth, and reset Stop loop counters."""
+    transcript_prompt, turn_key = load_latest_user_request_record(payload)
+    prompt = extract_prompt_text(payload) or transcript_prompt
+    state = load_state(payload)
+    if (
+        state.get("stop_block_count")
+        or state.get("last_stop_block_reason")
+        or (turn_key and turn_key != state.get("last_stop_turn_key"))
+        or (prompt and prompt != state.get("last_prompt"))
+    ):
+        state["stop_block_count"] = 0
+        state["last_stop_block_reason"] = ""
+        if turn_key:
+            state["last_stop_turn_key"] = turn_key
+        if prompt:
+            state["last_prompt"] = prompt
+        persist_state(payload, state)
     if prompt:
         record_leave(payload, prompt)
-        record_tdd_prompt_authorization(payload, prompt)
+        record_tdd_prompt_authorization(payload, prompt, turn_key=turn_key)
     return 0
 
 
@@ -255,7 +358,7 @@ def dispatch(payload: dict[str, Any]) -> int:
         return intercept_pre_tool_use(payload)
     if event == "posttooluse":
         return intercept_post_tool_use(payload)
-    if event == "userpromptsubmit":
+    if event in {"userpromptsubmit", "preinvocation"}:
         return intercept_user_prompt(payload)
     if event == "sessionstart":
         return intercept_session_start(payload)

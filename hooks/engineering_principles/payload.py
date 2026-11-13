@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -9,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from engineering_principles.config import OLD_TEXT_MAX_BYTES
+
+
+COMMAND_EXIT_RE = re.compile(r"Command exited with code (\d+)\.")
 
 
 def normalize_event(payload: dict[str, Any]) -> str:
@@ -213,16 +217,107 @@ def _load_transcript_lines(transcript_path: Any) -> list[str]:
         return []
 
 
-def extract_latest_user_request(payload: dict[str, Any]) -> str:
-    """Return the latest user request text from the payload or transcript."""
+def _derive_prompt_digest(text: str) -> str:
+    """Compute a short deterministic digest for a user request string."""
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def load_latest_user_request_record(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    """Return latest owner request text and a stable per-message turn key."""
     direct = extract_prompt_text(payload)
-    if direct:
-        return direct
     transcript_path = payload.get("transcriptPath") or payload.get(
         "transcript_path"
     )
-    for line in reversed(_load_transcript_lines(transcript_path)):
-        result = _parse_transcript_line(line)
-        if result:
-            return result
-    return ""
+    lines = _load_transcript_lines(transcript_path)
+    for idx in range(len(lines) - 1, -1, -1):
+        result = _parse_transcript_line(lines[idx])
+        if not result:
+            continue
+        if not direct or result == direct:
+            return result, f"t{idx}:{_derive_prompt_digest(result)}"
+        break
+    if direct:
+        return direct, f"direct:{_derive_prompt_digest(direct)}"
+    return "", ""
+
+
+def extract_latest_user_request(payload: dict[str, Any]) -> str:
+    """Return the latest user request text from the payload or transcript."""
+    prompt, _turn_key = load_latest_user_request_record(payload)
+    return prompt
+
+
+def _extract_direct_exit_code(payload: dict[str, Any]) -> int | None:
+    """Extract an integer command exit code directly from payload if set."""
+    containers: list[Any] = [payload]
+    for container_key in ("toolResponse", "toolOutput", "toolResult"):
+        nested = payload.get(container_key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for key in ("exitCode", "exit_code", "returncode", "statusCode"):
+            val = container.get(key)
+            if isinstance(val, int) and not isinstance(val, bool):
+                return val
+    return None
+
+
+def _inspect_generic_step_outcome(
+    event: dict[str, Any],
+) -> tuple[bool | None, str]:
+    """Classify one transcript GENERIC step into (has_error, output_text)."""
+    content = event.get("content")
+    text = content if isinstance(content, str) else ""
+    match = COMMAND_EXIT_RE.search(text)
+    if match:
+        return int(match.group(1)) != 0, text
+    if event.get("status") == "ERROR" or (
+        "Encountered error in step execution" in text
+    ):
+        return True, text
+    return None, text
+
+
+def load_command_execution_outcome(
+    payload: dict[str, Any],
+) -> tuple[bool | None, str]:
+    """Return (has_error, output_text) from payload or transcript step."""
+    error = payload.get("error")
+    if error:
+        return True, str(error)
+    exit_code = _extract_direct_exit_code(payload)
+    if exit_code is not None:
+        return exit_code != 0, ""
+
+    transcript_path = payload.get("transcriptPath") or payload.get(
+        "transcript_path"
+    )
+    lines = _load_transcript_lines(transcript_path)
+    if not lines:
+        return None, ""
+
+    step_idx = payload.get("stepIdx")
+    events: list[dict[str, Any]] = []
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            events.append(obj)
+
+    if isinstance(step_idx, int) and not isinstance(step_idx, bool):
+        candidates = {step_idx, step_idx + 1}
+        for event in reversed(events):
+            if event.get("type") != "GENERIC":
+                continue
+            if event.get("step_index") in candidates:
+                outcome, text = _inspect_generic_step_outcome(event)
+                if outcome is not None:
+                    return outcome, text
+    return None, ""

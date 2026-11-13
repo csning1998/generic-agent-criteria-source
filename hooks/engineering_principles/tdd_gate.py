@@ -4,18 +4,27 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import hashlib
+import os
 import re
 import subprocess
 from pathlib import Path
 from pathlib import PurePath
 from typing import Any
 
+from engineering_principles.config import COMPOSITE_VERIFY_CMD_RE
 from engineering_principles.config import GREEN_AUTH_RE
+from engineering_principles.config import GREEN_NEGATION_RE
+from engineering_principles.config import GREEN_QUESTION_RE
 from engineering_principles.config import LINTER_CMD_RE
 from engineering_principles.config import MUTATING_TOOLS
+from engineering_principles.config import QUOTED_SPAN_RE
 from engineering_principles.config import TDD_TEST_GLOBS
 from engineering_principles.config import TEST_RUNNER_CMD_RE
-from engineering_principles.payload import extract_latest_user_request
+from engineering_principles.payload import extract_command
+from engineering_principles.payload import extract_tool_input
+from engineering_principles.payload import load_command_execution_outcome
+from engineering_principles.payload import load_latest_user_request_record
 from engineering_principles.state import load_state
 from engineering_principles.state import persist_state
 from engineering_principles.state import resolve_workspace_root
@@ -90,20 +99,56 @@ def is_scaffolding_only_text(text: str) -> bool:
     return True
 
 
+def is_affirmative_green_authorization(prompt: str) -> bool:
+    """Return True if prompt affirms green transition outside quotes."""
+    if not prompt or not prompt.strip():
+        return False
+    unquoted = QUOTED_SPAN_RE.sub(" ", prompt)
+    clauses = re.split(r"(?<=[？?。\n!！;；,，])\s*", unquoted)
+    for clause in clauses:
+        text = clause.strip()
+        if not text or not GREEN_AUTH_RE.search(text):
+            continue
+        if GREEN_NEGATION_RE.search(text) or GREEN_QUESTION_RE.search(text):
+            continue
+        return True
+    return False
+
+
+def _compute_auth_key(prompt: str, turn_key: str) -> str:
+    """Compute a stable deduplication key for one owner authorization."""
+    if turn_key:
+        return turn_key
+    digest = hashlib.sha256(prompt.strip().encode("utf-8")).hexdigest()[:16]
+    return f"raw:{digest}"
+
+
 def record_tdd_prompt_authorization(
-    payload: dict[str, Any], prompt: str
-) -> None:
-    """Record owner green authorization if prompt matches GREEN_AUTH_RE."""
-    if not prompt or not GREEN_AUTH_RE.search(prompt):
-        return
+    payload: dict[str, Any], prompt: str, *, turn_key: str = ""
+) -> bool:
+    """Record owner green authorization when affirmative and unconsumed."""
+    if not is_affirmative_green_authorization(prompt):
+        return False
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
-    if stage in {"red_verified", "red_pending_verification", "premature_green"}:
-        state["tdd_stage"] = "green_authorized"
-        state["tdd_tests_passed_in_green"] = False
-        state["tdd_lint_verified"] = False
-        state["tdd_prod_mutated_in_green"] = False
-        persist_state(payload, state)
+    if stage not in {
+        "red_verified",
+        "red_pending_verification",
+        "premature_green",
+    }:
+        return False
+    auth_key = _compute_auth_key(prompt, turn_key)
+    consumed = [str(item) for item in state.get("tdd_consumed_auth_keys", [])]
+    if auth_key in consumed:
+        return False
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_tests_passed_in_green"] = False
+    state["tdd_lint_verified"] = False
+    state["tdd_prod_mutated_in_green"] = False
+    consumed.append(auth_key)
+    state["tdd_consumed_auth_keys"] = consumed[-20:]
+    persist_state(payload, state)
+    return True
 
 
 def find_tdd_write_deny_reason(
@@ -121,9 +166,10 @@ def find_tdd_write_deny_reason(
     if stage == "green_authorized":
         return None
 
-    prompt = extract_latest_user_request(payload)
-    if prompt and GREEN_AUTH_RE.search(prompt):
-        record_tdd_prompt_authorization(payload, prompt)
+    prompt, turn_key = load_latest_user_request_record(payload)
+    if prompt and record_tdd_prompt_authorization(
+        payload, prompt, turn_key=turn_key
+    ):
         return None
 
     if stage in {"red_pending_verification", "premature_green"}:
@@ -213,15 +259,76 @@ def record_tdd_linter(
     return True
 
 
+def parse_shell_command_segments(command: str) -> list[str]:
+    """Split a compound shell command into individual trimmed segments."""
+    if not command:
+        return []
+    parts = re.split(r"\s*(?:&&|\|\||;)\s*", command)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _inspect_failure_component(output_text: str) -> str:
+    """Classify compound command failure into lint, test, or both."""
+    if not output_text:
+        return "both"
+    has_test_fail = bool(
+        re.search(
+            r"\b\d+\s+failed\b|===+\s*FAILURES\s*===+|"
+            r"AssertionError|ERROR\s+collecting",
+            output_text,
+        )
+    )
+    has_lint_fail = bool(
+        re.search(r"Found \d+ error|\b[EWFD]\d{3,4}\s", output_text)
+    )
+    if has_lint_fail and not has_test_fail:
+        return "lint_failed"
+    if has_test_fail:
+        return "test_failed"
+    return "both"
+
+
 def record_tdd_command(
-    state: dict[str, Any], command: str, has_error: bool, stage: str
+    state: dict[str, Any],
+    command: str,
+    has_error: bool,
+    stage: str,
+    *,
+    output_text: str = "",
 ) -> bool:
     """Record test runner and linter commands from shell tool executions."""
+    segments = parse_shell_command_segments(command)
+    has_composite = any(COMPOSITE_VERIFY_CMD_RE.search(s) for s in segments)
+    has_test = has_composite or any(
+        TEST_RUNNER_CMD_RE.search(s) for s in segments
+    )
+    has_lint = has_composite or any(LINTER_CMD_RE.search(s) for s in segments)
+    if not has_test and not has_lint:
+        return False
+
     changed = False
-    if TEST_RUNNER_CMD_RE.search(command):
-        changed = record_tdd_test_runner(state, stage, has_error) or changed
-    if LINTER_CMD_RE.search(command):
-        changed = record_tdd_linter(state, stage, has_error) or changed
+    if not has_error:
+        if has_test:
+            changed = record_tdd_test_runner(state, stage, False) or changed
+        if has_lint:
+            changed = record_tdd_linter(state, stage, False) or changed
+        return changed
+
+    if has_test and has_lint:
+        kind = _inspect_failure_component(output_text)
+        if kind == "lint_failed":
+            return record_tdd_linter(state, stage, True)
+        if kind == "test_failed":
+            if "All checks passed!" in output_text:
+                changed = record_tdd_linter(state, stage, False) or changed
+            return record_tdd_test_runner(state, stage, True) or changed
+        changed = record_tdd_test_runner(state, stage, True) or changed
+        return record_tdd_linter(state, stage, True) or changed
+
+    if has_test:
+        changed = record_tdd_test_runner(state, stage, True) or changed
+    if has_lint:
+        changed = record_tdd_linter(state, stage, True) or changed
     return changed
 
 
@@ -242,21 +349,55 @@ def record_tdd_post_tool(
 
     is_cmd_tool = tool in {"runcommand", "runterminalcommand", "bash"}
     if (is_cmd_tool or command) and command:
-        has_error = bool(payload.get("error"))
+        payload_cmd = extract_command(extract_tool_input(payload))
+        if not payload_cmd or payload_cmd == command:
+            outcome, output_text = load_command_execution_outcome(payload)
+            has_error = (
+                outcome if outcome is not None else bool(payload.get("error"))
+            )
+        else:
+            has_error = bool(payload.get("error"))
+            output_text = ""
         changed = (
-            record_tdd_command(state, command, has_error, stage) or changed
+            record_tdd_command(
+                state, command, has_error, stage, output_text=output_text
+            )
+            or changed
         )
 
     if changed:
         persist_state(payload, state)
 
 
+def resolve_git_repo_root(path: str, workspace_root: Path) -> Path | None:
+    """Find the enclosing git repository root for target path or workspace."""
+    candidates: list[Path] = []
+    if path:
+        raw = Path(path).expanduser()
+        target = raw if raw.is_absolute() else workspace_root / raw
+        base = Path(os.path.abspath(target))
+        candidates.append(base if base.is_dir() else base.parent)
+    candidates.append(Path(os.path.abspath(workspace_root)))
+
+    for start in candidates:
+        for ancestor in (start, *start.parents):
+            if (ancestor / ".git").exists():
+                return ancestor
+    return None
+
+
 def is_git_dirty_path(path: str, workspace_root: Path) -> bool:
     """Return True if path holds uncommitted or untracked changes in git."""
+    repo_root = resolve_git_repo_root(path, workspace_root)
+    if repo_root is None:
+        return True
+    raw = Path(path).expanduser()
+    target = raw if raw.is_absolute() else workspace_root / raw
+    target_arg = os.path.abspath(target)
     try:
         proc = subprocess.run(
-            ["git", "status", "--porcelain", "--", path],
-            cwd=workspace_root,
+            ["git", "status", "--porcelain", "--", target_arg],
+            cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,

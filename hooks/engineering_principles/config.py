@@ -120,12 +120,39 @@ GREEN_AUTH_RE = re.compile(
     r"(可以轉綠|轉綠|進入綠燈|執行綠燈|authorize green|proceed to green)",
     re.I,
 )
+QUOTED_SPAN_RE = re.compile(
+    r"(「[^」\n]*」|『[^』\n]*』|\"[^\"\n]*\"|`[^`\n]*`)"
+)
+GREEN_NEGATION_RE = re.compile(
+    r"(不要|不能|不可|禁止|不得|別|尚未|還沒|不准|勿|取代|"
+    r"\bdon['\u2019]?t\b|\bdo\s+not\b|\bcannot\b|\bcan['\u2019]?t\b|"
+    r"\bnever\b|\bnot\b|\bavoid\b|\bstop\b)",
+    re.I,
+)
+GREEN_QUESTION_RE = re.compile(
+    r"(?:[？?]|嗎|是否|何時|什麼時候|為何|為什麼|"
+    r"\b(?:can\s+(?:we|i)|should\s+(?:we|i))\b)",
+    re.I,
+)
 TEST_RUNNER_CMD_RE = re.compile(
     r"\b(py\.?test|(?:bun(?:\s+run)?|npm|go)\s+test|npx\s+(?:vitest|jest))\b"
 )
 LINTER_CMD_RE = re.compile(
     r"\b(ruff\s+check|eslint|tsc|ng\s+lint|golangci-lint|bun\s+run\s+(?:lint|check|build))\b"
 )
+COMPOSITE_VERIFY_CMD_RE = re.compile(r"(?:^|[;&|/\s])pytest\.sh\b")
+STOP_BYPASS_TERMINATION_REASONS = frozenset(
+    {
+        "USER_CANCELED",
+        "ERROR",
+        "MAX_INVOCATIONS",
+        "MAX_FORCED_INVOCATIONS",
+        "MAX_TOKEN_BUDGET_EXCEEDED",
+        "TERMINAL_STEP_TYPE",
+        "TERMINAL_CUSTOM_HOOK",
+    }
+)
+MAX_STOP_CONTINUATIONS = 2
 TDD_TEST_GLOBS = (
     "**/tests/**",
     "*_test.py",

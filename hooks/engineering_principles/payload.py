@@ -305,39 +305,93 @@ def _load_step_output_file(
     return _inspect_command_output_text(text), text
 
 
-def _resolve_candidate_step_indices(
-    events: list[dict[str, Any]], step_idx: int, target_command: str
-) -> list[int]:
-    """Resolve GENERIC step indices for a tool step including parallel calls."""
-    planner_event: dict[str, Any] | None = None
+def _find_planner_response_event(
+    events: list[dict[str, Any]], step_idx: int
+) -> dict[str, Any] | None:
+    """Return the latest PLANNER_RESPONSE event matching step_idx."""
     for event in reversed(events):
         if (
             event.get("type") == "PLANNER_RESPONSE"
             and event.get("step_index") == step_idx
         ):
-            planner_event = event
-            break
+            return event
+    return None
 
+
+def _resolve_parallel_tool_indices(
+    tool_calls: list[Any], step_idx: int, target_command: str
+) -> list[int]:
+    """Return step indices of tool calls matching target_command."""
+    expected = target_command.strip()
+    if not expected:
+        return []
+    matched: list[int] = []
+    for offset, call in enumerate(tool_calls):
+        if not isinstance(call, dict):
+            continue
+        args = call.get("args") or call.get("arguments") or {}
+        if isinstance(args, dict) and extract_command(args).strip() == expected:
+            matched.append(step_idx + 1 + offset)
+    return matched
+
+
+def _resolve_candidate_step_indices(
+    events: list[dict[str, Any]], step_idx: int, target_command: str
+) -> list[int]:
+    """Resolve GENERIC step indices for a tool step including parallel calls."""
+    planner_event = _find_planner_response_event(events, step_idx)
     if planner_event is None:
         return [step_idx, step_idx + 1]
 
     tool_calls = planner_event.get("tool_calls")
-    if isinstance(tool_calls, list) and tool_calls:
-        if target_command:
-            matched: list[int] = []
-            for offset, call in enumerate(tool_calls):
-                if not isinstance(call, dict):
-                    continue
-                args = call.get("args") or call.get("arguments") or {}
-                if isinstance(args, dict) and (
-                    extract_command(args).strip() == target_command.strip()
-                ):
-                    matched.append(step_idx + 1 + offset)
-            if matched:
-                return matched
-        return [step_idx + 1 + pos for pos in range(len(tool_calls))]
+    if not isinstance(tool_calls, list) or not tool_calls:
+        return [step_idx, step_idx + 1]
 
-    return [step_idx, step_idx + 1]
+    matched = _resolve_parallel_tool_indices(
+        tool_calls, step_idx, target_command
+    )
+    if matched:
+        return matched
+    return [step_idx + 1 + pos for pos in range(len(tool_calls))]
+
+
+def _parse_transcript_events(transcript_path: Any) -> list[dict[str, Any]]:
+    """Parse JSON object events from transcript_path, skipping invalid lines."""
+    events: list[dict[str, Any]] = []
+    for raw in _load_transcript_lines(transcript_path):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            events.append(obj)
+    return events
+
+
+def _find_candidate_outcome(
+    transcript_path: Any,
+    events: list[dict[str, Any]],
+    candidates: list[int],
+) -> tuple[bool | None, str]:
+    """Resolve command outcome from step output files or GENERIC log steps."""
+    for cand in candidates:
+        step_outcome, step_text = _load_step_output_file(transcript_path, cand)
+        if step_outcome is not None:
+            return step_outcome, step_text
+
+    candidate_set = set(candidates)
+    for event in reversed(events):
+        if (
+            event.get("type") == "GENERIC"
+            and event.get("step_index") in candidate_set
+        ):
+            outcome, text = _inspect_generic_step_outcome(event)
+            if outcome is not None:
+                return outcome, text
+    return None, ""
 
 
 def load_command_execution_outcome(
@@ -359,33 +413,8 @@ def load_command_execution_outcome(
         "transcript_path"
     )
     target_command = extract_command(extract_tool_input(payload))
-    lines = _load_transcript_lines(transcript_path)
-    events: list[dict[str, Any]] = []
-    for raw in lines:
-        stripped = raw.strip()
-        if not stripped:
-            continue
-        try:
-            obj = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict):
-            events.append(obj)
-
+    events = _parse_transcript_events(transcript_path)
     candidates = _resolve_candidate_step_indices(
         events, step_idx, target_command
     )
-    for cand in candidates:
-        step_outcome, step_text = _load_step_output_file(transcript_path, cand)
-        if step_outcome is not None:
-            return step_outcome, step_text
-
-    candidate_set = set(candidates)
-    for event in reversed(events):
-        if event.get("type") != "GENERIC":
-            continue
-        if event.get("step_index") in candidate_set:
-            outcome, text = _inspect_generic_step_outcome(event)
-            if outcome is not None:
-                return outcome, text
-    return None, ""
+    return _find_candidate_outcome(transcript_path, events, candidates)

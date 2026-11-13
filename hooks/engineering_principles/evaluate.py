@@ -449,28 +449,32 @@ def find_iac_sql_reason(path: str, text: str, before: str) -> str | None:
     )
 
 
-def _extract_non_comment_lines(path: str, text: str) -> str:
-    """Keep executable lines and blank out comments to preserve indices."""
-    is_sql = is_sql_document_path(path)
+def _extract_sql_non_comment_lines(text: str) -> str:
+    """Keep executable SQL lines and blank out -- and /* ... */ comments."""
     filtered: list[str] = []
     in_block = False
     for line in text.splitlines():
         stripped = line.lstrip()
-        if not is_sql:
-            filtered.append("" if stripped.startswith("#") else line)
-            continue
         if in_block:
             filtered.append("")
-            if "*/" in line:
-                in_block = False
+            in_block = "*/" not in line
             continue
         if stripped.startswith("/*"):
             filtered.append("")
-            if "*/" not in line:
-                in_block = True
+            in_block = "*/" not in line
             continue
         filtered.append("" if stripped.startswith("--") else line)
     return "\n".join(filtered)
+
+
+def _extract_non_comment_lines(path: str, text: str) -> str:
+    """Keep executable lines and blank out comments to preserve indices."""
+    if is_sql_document_path(path):
+        return _extract_sql_non_comment_lines(text)
+    return "\n".join(
+        "" if line.lstrip().startswith("#") else line
+        for line in text.splitlines()
+    )
 
 
 def _extract_psql_lines(text: str) -> str:

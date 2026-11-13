@@ -4,18 +4,27 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import hashlib
+import os
 import re
 import subprocess
 from pathlib import Path
 from pathlib import PurePath
 from typing import Any
 
+from engineering_principles.config import COMPOSITE_VERIFY_CMD_RE
 from engineering_principles.config import GREEN_AUTH_RE
+from engineering_principles.config import GREEN_NEGATION_RE
+from engineering_principles.config import GREEN_QUESTION_RE
 from engineering_principles.config import LINTER_CMD_RE
 from engineering_principles.config import MUTATING_TOOLS
+from engineering_principles.config import QUOTED_SPAN_RE
 from engineering_principles.config import TDD_TEST_GLOBS
 from engineering_principles.config import TEST_RUNNER_CMD_RE
-from engineering_principles.payload import extract_latest_user_request
+from engineering_principles.payload import extract_command
+from engineering_principles.payload import extract_tool_input
+from engineering_principles.payload import load_command_execution_outcome
+from engineering_principles.payload import load_latest_user_request_record
 from engineering_principles.state import load_state
 from engineering_principles.state import persist_state
 from engineering_principles.state import resolve_workspace_root
@@ -90,20 +99,56 @@ def is_scaffolding_only_text(text: str) -> bool:
     return True
 
 
+def is_affirmative_green_authorization(prompt: str) -> bool:
+    """Return True if prompt affirms green transition outside quotes."""
+    if not prompt or not prompt.strip():
+        return False
+    unquoted = QUOTED_SPAN_RE.sub(" ", prompt)
+    clauses = re.split(r"(?<=[？?。\n!！;；,，])\s*", unquoted)
+    for clause in clauses:
+        text = clause.strip()
+        if not text or not GREEN_AUTH_RE.search(text):
+            continue
+        if GREEN_NEGATION_RE.search(text) or GREEN_QUESTION_RE.search(text):
+            continue
+        return True
+    return False
+
+
+def _compute_auth_key(prompt: str, turn_key: str) -> str:
+    """Compute a stable deduplication key for one owner authorization."""
+    if turn_key:
+        return turn_key
+    digest = hashlib.sha256(prompt.strip().encode("utf-8")).hexdigest()[:16]
+    return f"raw:{digest}"
+
+
 def record_tdd_prompt_authorization(
-    payload: dict[str, Any], prompt: str
-) -> None:
-    """Record owner green authorization if prompt matches GREEN_AUTH_RE."""
-    if not prompt or not GREEN_AUTH_RE.search(prompt):
-        return
+    payload: dict[str, Any], prompt: str, *, turn_key: str = ""
+) -> bool:
+    """Record owner green authorization when affirmative and unconsumed."""
+    if not is_affirmative_green_authorization(prompt):
+        return False
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
-    if stage in {"red_verified", "red_pending_verification", "premature_green"}:
-        state["tdd_stage"] = "green_authorized"
-        state["tdd_tests_passed_in_green"] = False
-        state["tdd_lint_verified"] = False
-        state["tdd_prod_mutated_in_green"] = False
-        persist_state(payload, state)
+    if stage not in {
+        "red_verified",
+        "red_pending_verification",
+        "premature_green",
+    }:
+        return False
+    auth_key = _compute_auth_key(prompt, turn_key)
+    consumed = [str(item) for item in state.get("tdd_consumed_auth_keys", [])]
+    if auth_key in consumed:
+        return False
+    state["tdd_stage"] = "green_authorized"
+    state["tdd_tests_passed_in_green"] = False
+    state["tdd_lint_verified"] = False
+    state["tdd_prod_mutated_in_green"] = False
+    consumed.append(auth_key)
+    state["tdd_consumed_auth_keys"] = consumed[-20:]
+    persist_state(payload, state)
+    return True
 
 
 def find_tdd_write_deny_reason(
@@ -116,14 +161,16 @@ def find_tdd_write_deny_reason(
     if not is_tdd_production_path(path, workspace_root):
         return None
 
+    reconcile_tdd_pending_commands(payload)
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
     if stage == "green_authorized":
         return None
 
-    prompt = extract_latest_user_request(payload)
-    if prompt and GREEN_AUTH_RE.search(prompt):
-        record_tdd_prompt_authorization(payload, prompt)
+    prompt, turn_key = load_latest_user_request_record(payload)
+    if prompt and record_tdd_prompt_authorization(
+        payload, prompt, turn_key=turn_key
+    ):
         return None
 
     if stage in {"red_pending_verification", "premature_green"}:
@@ -213,16 +260,230 @@ def record_tdd_linter(
     return True
 
 
+def parse_shell_command_segments(command: str) -> list[str]:
+    """Split a compound shell command into individual trimmed segments."""
+    if not command:
+        return []
+    parts = re.split(r"&&|\|\||;", command)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _inspect_failure_component(output_text: str) -> str:
+    """Classify compound command failure into lint, test, or both."""
+    if not output_text:
+        return "both"
+    has_test_fail = bool(
+        re.search(
+            r"\b\d+\s+failed\b|===+\s*FAILURES\s*===+|"
+            r"AssertionError|ERROR\s+collecting",
+            output_text,
+        )
+    )
+    has_lint_fail = bool(
+        re.search(
+            r"Found \d+ error|\b[EWFD]\d{3,4}\s|"
+            r"\b\d+\s+files?\s+would be reformatted|would reformat",
+            output_text,
+        )
+    )
+    if has_lint_fail and not has_test_fail:
+        return "lint_failed"
+    if has_test_fail:
+        return "test_failed"
+    return "both"
+
+
+def _derive_tdd_command_flags(command: str) -> tuple[bool, bool]:
+    """Return (has_test, has_lint) flags for segments of command."""
+    segments = parse_shell_command_segments(command)
+    has_composite = any(COMPOSITE_VERIFY_CMD_RE.search(s) for s in segments)
+    has_test = has_composite or any(
+        TEST_RUNNER_CMD_RE.search(s) for s in segments
+    )
+    has_lint = has_composite or any(LINTER_CMD_RE.search(s) for s in segments)
+    return has_test, has_lint
+
+
+def _record_compound_tdd_failure(
+    state: dict[str, Any], stage: str, output_text: str
+) -> bool:
+    """Record failure attribution for a compound test and linter command."""
+    kind = _inspect_failure_component(output_text)
+    if kind == "lint_failed":
+        return record_tdd_linter(state, stage, True)
+    if kind == "test_failed":
+        changed = False
+        if "All checks passed!" in output_text:
+            changed = record_tdd_linter(state, stage, False)
+        return record_tdd_test_runner(state, stage, True) or changed
+    changed = record_tdd_test_runner(state, stage, True)
+    return record_tdd_linter(state, stage, True) or changed
+
+
 def record_tdd_command(
-    state: dict[str, Any], command: str, has_error: bool, stage: str
+    state: dict[str, Any],
+    command: str,
+    has_error: bool,
+    stage: str,
+    *,
+    output_text: str = "",
 ) -> bool:
     """Record test runner and linter commands from shell tool executions."""
+    has_test, has_lint = _derive_tdd_command_flags(command)
+    if not has_test and not has_lint:
+        return False
+    if has_error and has_test and has_lint:
+        return _record_compound_tdd_failure(state, stage, output_text)
+
     changed = False
-    if TEST_RUNNER_CMD_RE.search(command):
+    if has_test:
         changed = record_tdd_test_runner(state, stage, has_error) or changed
-    if LINTER_CMD_RE.search(command):
+    if has_lint:
         changed = record_tdd_linter(state, stage, has_error) or changed
     return changed
+
+
+def _record_pending_command(
+    state: dict[str, Any], payload: dict[str, Any], command: str, stage: str
+) -> bool:
+    """Store un-flushed TDD command metadata for post-tool reconciliation."""
+    has_test, has_lint = _derive_tdd_command_flags(command)
+    if not has_test and not has_lint:
+        return False
+    pending = list(state.get("tdd_pending_commands") or [])
+    pending.append(
+        {
+            "command": command,
+            "step_idx": payload.get("stepIdx"),
+            "pre_stage": stage,
+            "pre_tests_passed_in_green": bool(
+                state.get("tdd_tests_passed_in_green")
+            ),
+            "pre_lint_verified": bool(state.get("tdd_lint_verified")),
+        }
+    )
+    state["tdd_pending_commands"] = pending[-10:]
+    return True
+
+
+def _reconcile_pending_pre_stage(
+    state: dict[str, Any],
+    item: dict[str, Any],
+    has_test: bool,
+    has_lint: bool,
+) -> str:
+    """Restore affected optimistic flags from item and return eval stage."""
+    pre_stage = str(item.get("pre_stage") or state.get("tdd_stage") or "idle")
+    is_red = pre_stage in {
+        "red_pending_verification",
+        "red_verified",
+        "premature_green",
+    }
+    is_green = pre_stage == "green_authorized" and bool(
+        state.get("tdd_prod_mutated_in_green")
+    )
+    if not is_red and not is_green:
+        return str(state.get("tdd_stage") or "idle")
+
+    if has_lint:
+        state["tdd_lint_verified"] = bool(item.get("pre_lint_verified"))
+    if is_red:
+        if has_test:
+            state["tdd_stage"] = pre_stage
+        return str(state.get("tdd_stage") or pre_stage)
+
+    state["tdd_stage"] = "green_authorized"
+    if has_test:
+        state["tdd_tests_passed_in_green"] = bool(
+            item.get("pre_tests_passed_in_green")
+        )
+    return "green_authorized"
+
+
+def _record_pending_command_failure(
+    state: dict[str, Any], item: dict[str, Any], cmd: str, output_text: str
+) -> None:
+    """Apply a reconciled failing TDD command against recorded pre-stage."""
+    has_test, has_lint = _derive_tdd_command_flags(cmd)
+    eval_stage = _reconcile_pending_pre_stage(state, item, has_test, has_lint)
+    record_tdd_command(state, cmd, True, eval_stage, output_text=output_text)
+
+
+def _reconcile_pending_item(
+    state: dict[str, Any], item: Any, transcript_path: Any
+) -> tuple[bool, bool]:
+    """Reconcile one pending entry, returning (resolved, changed)."""
+    if not isinstance(item, dict):
+        return True, True
+    cmd = str(item.get("command") or "")
+    step_idx = item.get("step_idx")
+    if not cmd or isinstance(step_idx, bool) or not isinstance(step_idx, int):
+        return True, True
+    probe = {
+        "transcriptPath": transcript_path,
+        "stepIdx": step_idx,
+        "toolInput": {"CommandLine": cmd},
+    }
+    outcome, output_text = load_command_execution_outcome(probe)
+    if outcome is None:
+        return False, False
+    if outcome:
+        _record_pending_command_failure(state, item, cmd, output_text)
+    return True, True
+
+
+def reconcile_tdd_pending_commands(payload: dict[str, Any]) -> None:
+    """Re-evaluate pending TDD commands once transcript/step outputs flush."""
+    state = load_state(payload)
+    pending = state.get("tdd_pending_commands")
+    if not isinstance(pending, list) or not pending:
+        return
+
+    transcript_path = payload.get("transcriptPath") or payload.get(
+        "transcript_path"
+    )
+    remaining: list[dict[str, Any]] = []
+    changed = False
+    for item in pending:
+        resolved, item_changed = _reconcile_pending_item(
+            state, item, transcript_path
+        )
+        changed = item_changed or changed
+        if not resolved and isinstance(item, dict):
+            remaining.append(item)
+
+    if changed:
+        state["tdd_pending_commands"] = remaining[-10:]
+        persist_state(payload, state)
+
+
+def _record_tdd_shell_post_tool(
+    state: dict[str, Any], payload: dict[str, Any], command: str, stage: str
+) -> bool:
+    """Inspect shell tool outcome after execution and record TDD state."""
+    payload_cmd = extract_command(extract_tool_input(payload))
+    if payload_cmd and payload_cmd != command:
+        return record_tdd_command(
+            state,
+            command,
+            bool(payload.get("error")),
+            stage,
+            output_text="",
+        )
+    outcome, output_text = load_command_execution_outcome(payload)
+    has_error = outcome if outcome is not None else bool(payload.get("error"))
+    has_transcript = bool(
+        payload.get("transcriptPath") or payload.get("transcript_path")
+    )
+    changed = False
+    if outcome is None and not has_error and has_transcript:
+        changed = _record_pending_command(state, payload, command, stage)
+    return (
+        record_tdd_command(
+            state, command, has_error, stage, output_text=output_text
+        )
+        or changed
+    )
 
 
 def record_tdd_post_tool(
@@ -240,23 +501,45 @@ def record_tdd_post_tool(
             or changed
         )
 
-    is_cmd_tool = tool in {"runcommand", "runterminalcommand", "bash"}
-    if (is_cmd_tool or command) and command:
-        has_error = bool(payload.get("error"))
+    if command:
         changed = (
-            record_tdd_command(state, command, has_error, stage) or changed
+            _record_tdd_shell_post_tool(state, payload, command, stage)
+            or changed
         )
 
     if changed:
         persist_state(payload, state)
 
 
+def resolve_git_repo_root(path: str, workspace_root: Path) -> Path | None:
+    """Find the enclosing git repository root for target path or workspace."""
+    candidates: list[Path] = []
+    if path:
+        raw = Path(path).expanduser()
+        target = raw if raw.is_absolute() else workspace_root / raw
+        base = Path(os.path.abspath(target))
+        candidates.append(base if base.is_dir() else base.parent)
+    candidates.append(Path(os.path.abspath(workspace_root)))
+
+    for start in candidates:
+        for ancestor in (start, *start.parents):
+            if (ancestor / ".git").exists():
+                return ancestor
+    return None
+
+
 def is_git_dirty_path(path: str, workspace_root: Path) -> bool:
     """Return True if path holds uncommitted or untracked changes in git."""
+    repo_root = resolve_git_repo_root(path, workspace_root)
+    if repo_root is None:
+        return True
+    raw = Path(path).expanduser()
+    target = raw if raw.is_absolute() else workspace_root / raw
+    target_arg = os.path.abspath(target)
     try:
         proc = subprocess.run(
-            ["git", "status", "--porcelain", "--", path],
-            cwd=workspace_root,
+            ["git", "status", "--porcelain", "--", target_arg],
+            cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
@@ -292,6 +575,7 @@ def find_green_authorized_block_reason(
 
 def find_tdd_stop_block_reason(payload: dict[str, Any]) -> str | None:
     """Return stop reason when turn concludes without meeting TDD checks."""
+    reconcile_tdd_pending_commands(payload)
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
     workspace_root = resolve_workspace_root(payload)
@@ -301,6 +585,7 @@ def find_tdd_stop_block_reason(payload: dict[str, Any]) -> str | None:
         if mods and not any(is_git_dirty_path(p, workspace_root) for p in mods):
             state["tdd_stage"] = "idle"
             state["tdd_modified_tests"] = []
+            state["tdd_pending_commands"] = []
             persist_state(payload, state)
             return None
 

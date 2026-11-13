@@ -89,6 +89,11 @@ def derive_empty_state(payload: dict[str, Any]) -> dict[str, Any]:
         "tdd_lint_verified": False,
         "tdd_tests_passed_in_green": False,
         "tdd_prod_mutated_in_green": False,
+        "tdd_consumed_auth_keys": [],
+        "tdd_pending_commands": [],
+        "stop_block_count": 0,
+        "last_stop_block_reason": "",
+        "last_stop_turn_key": "",
     }
 
 
@@ -115,6 +120,18 @@ def load_state(payload: dict[str, Any]) -> dict[str, Any]:
         merged["skill_module_writes"] = []
     if not isinstance(merged.get("tdd_modified_tests"), list):
         merged["tdd_modified_tests"] = []
+    if not isinstance(merged.get("tdd_consumed_auth_keys"), list):
+        merged["tdd_consumed_auth_keys"] = []
+    if not isinstance(merged.get("tdd_pending_commands"), list):
+        merged["tdd_pending_commands"] = []
+    if not isinstance(merged.get("stop_block_count"), int) or isinstance(
+        merged.get("stop_block_count"), bool
+    ):
+        merged["stop_block_count"] = 0
+    if not isinstance(merged.get("last_stop_block_reason"), str):
+        merged["last_stop_block_reason"] = ""
+    if not isinstance(merged.get("last_stop_turn_key"), str):
+        merged["last_stop_turn_key"] = ""
     return merged
 
 

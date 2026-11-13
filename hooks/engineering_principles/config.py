@@ -45,18 +45,36 @@ IAC_SQL_RE = re.compile(
     r"\bALTER\s+(?:USER|ROLE)\b)",
     re.I,
 )
+_SQL_IDENT = r"(?:\"[^\"]+\"|[a-zA-Z_][\w.\"$]*)"
+_SQL_PRIV = (
+    r"(?:SELECT|INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER|"
+    r"CREATE|CONNECT|TEMPORARY|TEMP|EXECUTE|USAGE|MAINTAIN|"
+    r"ALTER\s+SYSTEM)(?:\s*\([^)]+\))?"
+)
+_PREPOSITION_STOP = r"(?:for|in|of|from|to|with|on|by|at|as|and|or|the|a|an|if)"
 MUTATING_SQL_RE = re.compile(
     r"("
     r"\bALTER\s+(?:USER|ROLE)\b"
     r"|\bINSERT\s+INTO\b"
-    r"|\bUPDATE\s+\S+\s+SET\b"
+    rf"|\bUPDATE\s+{_SQL_IDENT}\s+"
+    rf"(?:(?:AS\s+)?[a-zA-Z_]\w*\s+)?SET\s+(?:\([^)]+\)|{_SQL_IDENT})\s*="
     r"|\bDELETE\s+FROM\b"
-    r"|\bTRUNCATE\s+"
+    rf"|\bTRUNCATE\s+(?:TABLE\s+{_SQL_IDENT}|"
+    rf"(?:ONLY\s+)?(?!{_PREPOSITION_STOP}\b){_SQL_IDENT}"
+    r"(?:\s*(?:;|,|'|\"|$)|\s+(?:RESTART|CONTINUE|CASCADE|RESTRICT)\b))"
     r"|\bDROP\s+(?:DATABASE|TABLE|USER|ROLE|SCHEMA)\b"
-    r"|\bCREATE\s+(?:USER|ROLE)\b"
-    r"|\bGRANT\s+"
-    r"|\bREVOKE\s+"
+    rf"|\bCREATE\s+(?:USER|ROLE)\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    rf"(?!{_PREPOSITION_STOP}\b){_SQL_IDENT}"
+    r"|\b(?:GRANT|REVOKE(?:\s+GRANT\s+OPTION\s+FOR)?)\s+"
+    rf"(?:ALL(?:\s+PRIVILEGES)?|{_SQL_PRIV}(?:\s*,\s*{_SQL_PRIV})*)\s+ON\b"
+    r"|\b(?:GRANT|REVOKE(?:\s+ADMIN\s+OPTION\s+FOR)?)\s+"
+    r"(?:pg_\w+|[a-zA-Z_][\w$]*_[a-zA-Z0-9_$]+|\"[^\"]+\")\s+"
+    rf"(?:TO|FROM)\s+(?!(?:the|a|an)\b){_SQL_IDENT}"
     r")",
+    re.I,
+)
+SQL_GRANT_REVOKE_RE = re.compile(
+    rf"\b(?:GRANT|REVOKE)\s+(?:ALL\b|{_SQL_IDENT}\s+(?:ON|TO|FROM)\b)",
     re.I,
 )
 GUEST_SQL_CMD_RE = re.compile(
@@ -100,12 +118,40 @@ GREEN_AUTH_RE = re.compile(
     r"(可以轉綠|轉綠|進入綠燈|執行綠燈|authorize green|proceed to green)",
     re.I,
 )
+QUOTED_SPAN_RE = re.compile(
+    r"(「[^」\n]*」|『[^』\n]*』|\"[^\"\n]*\"|`[^`\n]*`)"
+)
+GREEN_NEGATION_RE = re.compile(
+    r"(不要|不能|不可|禁止|不得|別|尚未|還沒|不准|勿|取代|"
+    r"\bdon['\u2019]?t\b|\bdo\s+not\b|\bcannot\b|\bcan['\u2019]?t\b|"
+    r"\bnever\b|\bnot\b|\bavoid\b|\bstop\b)",
+    re.I,
+)
+GREEN_QUESTION_RE = re.compile(
+    r"(?:[？?]|嗎|是否|何時|什麼時候|為何|為什麼|"
+    r"\b(?:can\s+(?:we|i)|should\s+(?:we|i))\b)",
+    re.I,
+)
 TEST_RUNNER_CMD_RE = re.compile(
     r"\b(py\.?test|(?:bun(?:\s+run)?|npm|go)\s+test|npx\s+(?:vitest|jest))\b"
 )
 LINTER_CMD_RE = re.compile(
-    r"\b(ruff\s+check|eslint|tsc|ng\s+lint|golangci-lint|bun\s+run\s+(?:lint|check|build))\b"
+    r"\b(ruff\s+(?:check|format)|eslint|tsc|ng\s+lint|golangci-lint|"
+    r"bun\s+run\s+(?:lint|check|build))\b"
 )
+COMPOSITE_VERIFY_CMD_RE = re.compile(r"(?:^|[;&|/\s])pytest\.sh\b")
+STOP_BYPASS_TERMINATION_REASONS = frozenset(
+    {
+        "USER_CANCELED",
+        "ERROR",
+        "MAX_INVOCATIONS",
+        "MAX_FORCED_INVOCATIONS",
+        "MAX_TOKEN_BUDGET_EXCEEDED",
+        "TERMINAL_STEP_TYPE",
+        "TERMINAL_CUSTOM_HOOK",
+    }
+)
+MAX_STOP_CONTINUATIONS = 2
 TDD_TEST_GLOBS = (
     "**/tests/**",
     "*_test.py",

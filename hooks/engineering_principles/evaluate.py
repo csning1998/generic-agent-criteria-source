@@ -23,6 +23,7 @@ from engineering_principles.config import PRODUCT_TOKEN_RE
 from engineering_principles.config import PROVISIONER_RE
 from engineering_principles.config import RANDOM_PASSWORD_RE
 from engineering_principles.config import READ_ONLY_CMD_RE
+from engineering_principles.config import SQL_GRANT_REVOKE_RE
 from engineering_principles.config import TAUTOLOGICAL_PROVIDER_RE
 from engineering_principles.config import VAULT_CREDENTIAL_MODULE_RE
 from engineering_principles.config import WRITE_CMD_RE
@@ -39,8 +40,10 @@ from engineering_principles.paths import is_generic_module
 from engineering_principles.paths import is_governed_path
 from engineering_principles.paths import is_iac_path
 from engineering_principles.paths import is_introduced_bootstrapper_name
+from engineering_principles.paths import is_mutating_sql_file_target
 from engineering_principles.paths import is_planning_gate_required
 from engineering_principles.paths import is_self_path
+from engineering_principles.paths import is_sql_document_path
 from engineering_principles.paths import load_architecture_repo_tokens
 from engineering_principles.paths import normalize_posix
 from engineering_principles.payload import extract_latest_user_request
@@ -342,20 +345,30 @@ def find_missing_planning_reason(
     )
 
 
+def _find_mutating_sql_pattern(text: str) -> re.Pattern[str] | None:
+    """Return matching mutating SQL regex inside a confirmed SQL context."""
+    if MUTATING_SQL_RE.search(text):
+        return MUTATING_SQL_RE
+    if SQL_GRANT_REVOKE_RE.search(text):
+        return SQL_GRANT_REVOKE_RE
+    return None
+
+
 def find_guest_sql_command_reason(
     state: dict[str, Any], command: str
 ) -> str | None:
     """Return a deny reason for a mutating guest SQL shell command."""
     if not command or not GUEST_SQL_CMD_RE.search(command):
         return None
-    if not MUTATING_SQL_RE.search(command):
+    pattern = _find_mutating_sql_pattern(command)
+    if pattern is None:
         return None
     if state.get("guest_sql_leave"):
         return None
     return render_cite(
         "Section 3 Item A.5",
         command,
-        MUTATING_SQL_RE,
+        pattern,
         "Mutating guest SQL is forbidden. Do not run ALTER USER, "
         "password reset, or other state changes to repair IaC drift. "
         "Read-only psql debug does not need leave. Owner phrase for a "
@@ -436,20 +449,69 @@ def find_iac_sql_reason(path: str, text: str, before: str) -> str | None:
     )
 
 
+def _extract_sql_non_comment_lines(text: str) -> str:
+    """Keep executable SQL lines and blank out -- and /* ... */ comments."""
+    filtered: list[str] = []
+    in_block = False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if in_block:
+            filtered.append("")
+            in_block = "*/" not in line
+            continue
+        if stripped.startswith("/*"):
+            filtered.append("")
+            in_block = "*/" not in line
+            continue
+        filtered.append("" if stripped.startswith("--") else line)
+    return "\n".join(filtered)
+
+
+def _extract_non_comment_lines(path: str, text: str) -> str:
+    """Keep executable lines and blank out comments to preserve indices."""
+    if is_sql_document_path(path):
+        return _extract_sql_non_comment_lines(text)
+    return "\n".join(
+        "" if line.lstrip().startswith("#") else line
+        for line in text.splitlines()
+    )
+
+
+def _extract_psql_lines(text: str) -> str:
+    """Keep only psql invocation lines, blanking others for line alignment."""
+    return "\n".join(
+        line if re.search(r"\bpsql\b", line, re.I) else ""
+        for line in text.splitlines()
+    )
+
+
 def find_mutating_sql_file_reason(
     path: str, text: str, before: str
 ) -> str | None:
     """Return a deny reason for a non-IaC file that embeds mutating SQL."""
-    if is_iac_path(path):
+    if is_iac_path(path) or not is_mutating_sql_file_target(path, text):
         return None
-    if not has_added_match(before, text, MUTATING_SQL_RE):
-        return None
-    if _has_sql_doc_exception(text):
+    masked_text = _extract_non_comment_lines(path, text)
+    masked_before = _extract_non_comment_lines(path, before) if before else ""
+    cite_text = masked_text
+    pattern: re.Pattern[str] | None = None
+    if has_added_match(masked_before, masked_text, MUTATING_SQL_RE):
+        pattern = MUTATING_SQL_RE
+    elif is_sql_document_path(path):
+        if has_added_match(masked_before, masked_text, SQL_GRANT_REVOKE_RE):
+            pattern = SQL_GRANT_REVOKE_RE
+    else:
+        psql_text = _extract_psql_lines(masked_text)
+        psql_before = _extract_psql_lines(masked_before)
+        if has_added_match(psql_before, psql_text, SQL_GRANT_REVOKE_RE):
+            pattern = SQL_GRANT_REVOKE_RE
+            cite_text = psql_text
+    if pattern is None or _has_sql_doc_exception(masked_text):
         return None
     return render_cite(
         "Section 3 Item A.5",
-        text,
-        MUTATING_SQL_RE,
+        cite_text,
+        pattern,
         "A script, Makefile, or CI file must not invoke ALTER USER or "
         "other mutating SQL to patch declaration drift.",
     )

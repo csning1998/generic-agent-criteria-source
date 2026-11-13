@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 _ID = re.compile(r"(?m)^id:\s*([A-Za-z0-9_-]+)\s*$")
-_CURSOR_KEY = re.compile(r"(?m)^(?P<indent>[ \t]+)cursor:\s*(?P<rest>.*)$")
+_CURSOR_KEY = re.compile(r"(?m)^(?P<indent>[ \t]+)cursor:(?P<rest>.*)$")
 _GLOBS = re.compile(r'\bglobs:\s*"([^"]+)"')
 _KEY_LINE = re.compile(r"^[a-zA-Z_]+:")
 

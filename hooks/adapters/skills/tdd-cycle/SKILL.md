@@ -16,7 +16,7 @@ Process aligns to `2_context/202_Test_Driven_Development.md`.
 2. Write the automated test which expresses the missing behavior.
 3. Run the automated test and confirm the test fails with a logical assertion error rather than a compilation or missing module error.
 4. Run every project linter and static typecheck which applies to the modified test and stub files. Resolve every failure in the same step before presenting the failing test result.
-5. Present the failing assertion test output to the owner. Stop. Do not write production code for that behavior until the owner explicitly authorizes the green step in the same or a later turn.
-6. After that authorization, write the minimal production change to satisfy the assertions. Re run the minimal automated test set. Re run every applicable project linter. Report results under § 111.
+5. Present the failing assertion test output to the owner in response prose and stop tool calls. Do not invoke `ask_question` or any interactive dialog to request or substitute for green authorization. Wait until the owner explicitly authorizes the green step in a direct chat message in the same or a later turn.
+6. After the chat authorization, write the minimal production change to satisfy the assertions. Reexecute the minimal automated test set. Reexecute every applicable project linter. Report results under § 111.
 
 Hygiene work MUST be completed by the system. Asking the owner whether to fix a lint failure MUST NOT replace that fix. Mutations outside the authorized duty MUST NOT proceed.

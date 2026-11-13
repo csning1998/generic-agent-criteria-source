@@ -43,14 +43,10 @@ WRITE_TARGET_RE = re.compile(
     r"(?:>>?|tee(?:\s+-a)?)\s+"
     r"(?:'([^']+)'|\"([^\"]+)\"|([^\s;|&]+))"
 )
-ECHO_RE = re.compile(
-    r"^\s*echo(?:\s+-[neE]+)*\s+(?P<body>.*?)\s*(?:>>?|\|)",
-    re.DOTALL,
-)
-PRINTF_RE = re.compile(
-    r"^\s*printf\s+(?P<body>.*?)\s*(?:>>?|\|)",
-    re.DOTALL,
-)
+# The scan runs in linear time because the body excludes the redirect and
+# pipe characters. Callers strip the whitespace.
+ECHO_RE = re.compile(r"^\s*echo(?:\s+-[neE]+)*\s(?P<body>[^>|]*)(?:>>?|\|)")
+PRINTF_RE = re.compile(r"^\s*printf\s(?P<body>[^>|]*)(?:>>?|\|)")
 HEREDOC_RE = re.compile(
     r"<<[-]?(['\"]?)(\w+)\1\n(.*?)(?:\n\2)(?:\n|$)",
     re.DOTALL,

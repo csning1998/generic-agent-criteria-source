@@ -507,3 +507,31 @@ def test_render_expected_payload_template_quotes_path_with_spaces(
     assert (
         f"'{spaced_root.resolve()}/hooks/bin/engineering-principles.py'" in cmd
     )
+
+
+def test_install_agy_hooks_json_registers_ask_question_and_pre_invocation(
+    tmp_path: Path,
+) -> None:
+    """Antigravity hooks.json gates ask_question and registers PreInvocation."""
+    grok_root = _repo_root()
+    home = tmp_path / "home"
+    home.mkdir()
+    spec = AdapterSpec(
+        source="hooks/adapters/antigravity/hooks.json",
+        dest=".gemini/config/hooks.json",
+        mode=MODE_TEMPLATE,
+    )
+    assert reconcile_spec(grok_root, home, spec) == "applied"
+    data = json.loads(
+        (home / ".gemini" / "config" / "hooks.json").read_text(encoding="utf-8")
+    )
+    cfg = data["gacs-engineering-principles"]
+    assert "ask_question" in cfg["PreToolUse"][0]["matcher"]
+    assert "PreInvocation" in cfg
+    assert cfg["PreInvocation"][0]["command"].startswith(
+        "GROK_HOOK_EVENT=PreInvocation "
+    )
+    assert "PostInvocation" in cfg
+    assert cfg["PostInvocation"][0]["command"].startswith(
+        "GROK_HOOK_EVENT=PostInvocation "
+    )

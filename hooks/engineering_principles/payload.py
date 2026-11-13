@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -9,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from engineering_principles.config import OLD_TEXT_MAX_BYTES
+
+
+COMMAND_EXIT_RE = re.compile(r"Command exited with code (\d+)\.")
 
 
 def normalize_event(payload: dict[str, Any]) -> str:
@@ -213,16 +217,204 @@ def _load_transcript_lines(transcript_path: Any) -> list[str]:
         return []
 
 
-def extract_latest_user_request(payload: dict[str, Any]) -> str:
-    """Return the latest user request text from the payload or transcript."""
+def _derive_prompt_digest(text: str) -> str:
+    """Compute a short deterministic digest for a user request string."""
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def load_latest_user_request_record(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    """Return latest owner request text and a stable per-message turn key."""
     direct = extract_prompt_text(payload)
-    if direct:
-        return direct
     transcript_path = payload.get("transcriptPath") or payload.get(
         "transcript_path"
     )
-    for line in reversed(_load_transcript_lines(transcript_path)):
-        result = _parse_transcript_line(line)
-        if result:
-            return result
-    return ""
+    lines = _load_transcript_lines(transcript_path)
+    for idx in range(len(lines) - 1, -1, -1):
+        result = _parse_transcript_line(lines[idx])
+        if not result:
+            continue
+        if not direct or result == direct:
+            return result, f"t{idx}:{_derive_prompt_digest(result)}"
+        break
+    if direct:
+        return direct, f"direct:{_derive_prompt_digest(direct)}"
+    return "", ""
+
+
+def extract_latest_user_request(payload: dict[str, Any]) -> str:
+    """Return the latest user request text from the payload or transcript."""
+    prompt, _turn_key = load_latest_user_request_record(payload)
+    return prompt
+
+
+def _extract_direct_exit_code(payload: dict[str, Any]) -> int | None:
+    """Extract an integer command exit code directly from payload if set."""
+    containers: list[Any] = [payload]
+    for container_key in ("toolResponse", "toolOutput", "toolResult"):
+        nested = payload.get(container_key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for key in ("exitCode", "exit_code", "returncode", "statusCode"):
+            val = container.get(key)
+            if isinstance(val, int) and not isinstance(val, bool):
+                return val
+    return None
+
+
+def _inspect_command_output_text(text: str) -> bool | None:
+    """Inspect command output text for Antigravity exit status markers."""
+    match = COMMAND_EXIT_RE.search(text)
+    if match:
+        return int(match.group(1)) != 0
+    if "Encountered error in step execution" in text:
+        return True
+    return None
+
+
+def _inspect_generic_step_outcome(
+    event: dict[str, Any],
+) -> tuple[bool | None, str]:
+    """Classify one transcript GENERIC step into (has_error, output_text)."""
+    content = event.get("content")
+    text = content if isinstance(content, str) else ""
+    parsed = _inspect_command_output_text(text)
+    if parsed is not None:
+        return parsed, text
+    if event.get("status") == "ERROR":
+        return True, text
+    return None, text
+
+
+def _load_step_output_file(
+    transcript_path: Any, step_index: int
+) -> tuple[bool | None, str]:
+    """Read sibling .system_generated/steps/<idx>/output.txt if present."""
+    if not transcript_path:
+        return None, ""
+    tpath = Path(str(transcript_path))
+    step_file = tpath.parent.parent / "steps" / str(step_index) / "output.txt"
+    if not step_file.is_file():
+        return None, ""
+    try:
+        text = step_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, ""
+    return _inspect_command_output_text(text), text
+
+
+def _find_planner_response_event(
+    events: list[dict[str, Any]], step_idx: int
+) -> dict[str, Any] | None:
+    """Return the latest PLANNER_RESPONSE event matching step_idx."""
+    for event in reversed(events):
+        if (
+            event.get("type") == "PLANNER_RESPONSE"
+            and event.get("step_index") == step_idx
+        ):
+            return event
+    return None
+
+
+def _resolve_parallel_tool_indices(
+    tool_calls: list[Any], step_idx: int, target_command: str
+) -> list[int]:
+    """Return step indices of tool calls matching target_command."""
+    expected = target_command.strip()
+    if not expected:
+        return []
+    matched: list[int] = []
+    for offset, call in enumerate(tool_calls):
+        if not isinstance(call, dict):
+            continue
+        args = call.get("args") or call.get("arguments") or {}
+        if isinstance(args, dict) and extract_command(args).strip() == expected:
+            matched.append(step_idx + 1 + offset)
+    return matched
+
+
+def _resolve_candidate_step_indices(
+    events: list[dict[str, Any]], step_idx: int, target_command: str
+) -> list[int]:
+    """Resolve GENERIC step indices for a tool step including parallel calls."""
+    planner_event = _find_planner_response_event(events, step_idx)
+    if planner_event is None:
+        return [step_idx, step_idx + 1]
+
+    tool_calls = planner_event.get("tool_calls")
+    if not isinstance(tool_calls, list) or not tool_calls:
+        return [step_idx, step_idx + 1]
+
+    matched = _resolve_parallel_tool_indices(
+        tool_calls, step_idx, target_command
+    )
+    if matched:
+        return matched
+    return [step_idx + 1 + pos for pos in range(len(tool_calls))]
+
+
+def _parse_transcript_events(transcript_path: Any) -> list[dict[str, Any]]:
+    """Parse JSON object events from transcript_path, skipping invalid lines."""
+    events: list[dict[str, Any]] = []
+    for raw in _load_transcript_lines(transcript_path):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            events.append(obj)
+    return events
+
+
+def _find_candidate_outcome(
+    transcript_path: Any,
+    events: list[dict[str, Any]],
+    candidates: list[int],
+) -> tuple[bool | None, str]:
+    """Resolve command outcome from step output files or GENERIC log steps."""
+    for cand in candidates:
+        step_outcome, step_text = _load_step_output_file(transcript_path, cand)
+        if step_outcome is not None:
+            return step_outcome, step_text
+
+    candidate_set = set(candidates)
+    for event in reversed(events):
+        if (
+            event.get("type") == "GENERIC"
+            and event.get("step_index") in candidate_set
+        ):
+            outcome, text = _inspect_generic_step_outcome(event)
+            if outcome is not None:
+                return outcome, text
+    return None, ""
+
+
+def load_command_execution_outcome(
+    payload: dict[str, Any],
+) -> tuple[bool | None, str]:
+    """Return (has_error, output_text) from payload, steps dir, or logs."""
+    error = payload.get("error")
+    if error:
+        return True, str(error)
+    exit_code = _extract_direct_exit_code(payload)
+    if exit_code is not None:
+        return exit_code != 0, ""
+
+    step_idx = payload.get("stepIdx")
+    if not isinstance(step_idx, int) or isinstance(step_idx, bool):
+        return None, ""
+
+    transcript_path = payload.get("transcriptPath") or payload.get(
+        "transcript_path"
+    )
+    target_command = extract_command(extract_tool_input(payload))
+    events = _parse_transcript_events(transcript_path)
+    candidates = _resolve_candidate_step_indices(
+        events, step_idx, target_command
+    )
+    return _find_candidate_outcome(transcript_path, events, candidates)

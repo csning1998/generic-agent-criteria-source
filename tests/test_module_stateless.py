@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import redirect_stderr
 from contextlib import redirect_stdout
 from io import StringIO
@@ -12,6 +13,7 @@ from engineering_principles.dispatch import intercept_post_tool_use
 from engineering_principles.dispatch import intercept_pre_tool_use
 from engineering_principles.dispatch import intercept_stop
 from engineering_principles.module_stateless import derive_composed_module_text
+from engineering_principles.module_stateless import extract_shell_write_payloads
 from engineering_principles.module_stateless import find_first_stateful_hit
 from engineering_principles.module_stateless import find_module_stateless_reason
 from engineering_principles.module_stateless import resolve_skill_module_paths
@@ -555,6 +557,30 @@ def test_intercept_stop_blocks_dirty_recorded_file(
         code = intercept_stop(stop)
     assert code == 0
     assert buf.getvalue().strip() == ""
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("echo -n  some-text >> out.md", ["some-text"]),
+        ("printf '%s' some-text | tee out.md", ["'%s' some-text"]),
+    ],
+)
+def test_extract_shell_write_payloads_strips_echo_and_printf_bodies(
+    command: str, expected: list[str]
+) -> None:
+    """An echo or printf body ends before the first redirect or pipe."""
+    assert extract_shell_write_payloads(command) == expected
+
+
+@pytest.mark.parametrize("head", ["echo", "printf"])
+def test_extract_shell_write_payloads_scans_long_whitespace_linearly(
+    head: str,
+) -> None:
+    """A long whitespace run without a redirect returns without backtracking."""
+    started = time.perf_counter()
+    assert extract_shell_write_payloads(head + " " * 3000 + "x") == []
+    assert time.perf_counter() - started < 1.0
 
 
 def test_intercept_stop_session_end(

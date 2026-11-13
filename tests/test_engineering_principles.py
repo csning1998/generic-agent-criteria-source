@@ -298,6 +298,159 @@ def test_ansible_and_iac_sql(workspace: Path) -> None:
     )
 
 
+def test_mutating_sql_file_skips_docs_data_and_non_script_code(
+    workspace: Path,
+) -> None:
+    """Docs, data files, and non-script sources skip the SQL file guard."""
+    payload = _payload(workspace)
+    prose = (
+        "does not grant create\n"
+        "Revoke Root Token\n"
+        "create role for operator\n"
+        "update the set of items\n"
+        "UPDATE users SET pass = 'x'\n"
+        "DELETE FROM users\n"
+        "ALTER USER postgres\n"
+    )
+    doc_paths = [
+        workspace / "parent-group-governance/stdout.md",
+        workspace / "meta-platform/scripts/README.md",
+        workspace / "meta-platform/scripts/README.md.j2",
+        workspace / ".gitlab/merge_request_templates/Default.md",
+        workspace / "config/policies.yaml",
+        workspace / "internal/rbac/grant.go",
+        workspace / "tests/test_sql_guard.py",
+        workspace / ".git/COMMIT_EDITMSG",
+    ]
+    for path in doc_paths:
+        assert find_write_deny_reason(payload, str(path), prose, "") is None
+
+
+def test_mutating_sql_file_allows_comments_and_non_sql_ops(
+    workspace: Path,
+) -> None:
+    """Comments, truncate flags, and English echo lines in scripts pass."""
+    payload = _payload(workspace)
+    shell_text = (
+        "# Revoke Root Token and ALTER USER on rotation\n"
+        "# create role for CI runner\n"
+        "truncate -s 0 /tmp/app.log\n"
+        "truncate --size=0 /tmp/err.log\n"
+        "echo 'update the set of caches'\n"
+        "echo 'grant permission to read'\n"
+        "echo 'create user in Vault'\n"
+        "psql -c 'select 1'\n"
+    )
+    script = workspace / "meta-platform/scripts/cleanup.sh"
+    assert find_write_deny_reason(payload, str(script), shell_text, "") is None
+
+    sql_text = (
+        "-- ALTER USER postgres PASSWORD 'foo'\n"
+        "/*\n"
+        "  DROP TABLE users;\n"
+        "  TRUNCATE sessions;\n"
+        "*/\n"
+        "SELECT 1;\n"
+    )
+    query = workspace / "meta-platform/scripts/query.sql"
+    assert find_write_deny_reason(payload, str(query), sql_text, "") is None
+
+
+@pytest.mark.parametrize(
+    ("rel_path", "snippet"),
+    [
+        ("meta-platform/scripts/migrate.sql", "GRANT admin TO bob;\n"),
+        ("meta-platform/scripts/migrate.sql.j2", "GRANT admin TO bob;\n"),
+        ("meta-platform/scripts/fix.sh", "psql -c 'grant admin to bob'\n"),
+        ("meta-platform/scripts/fix.sh.j2", "psql -c 'grant admin to bob'\n"),
+        (
+            "meta-platform/scripts/reset.sh",
+            "TRUNCATE users RESTART IDENTITY;\n",
+        ),
+        (
+            "meta-platform/scripts/up.sh",
+            "UPDATE users SET (name, pass) = ('a', 'b')\n",
+        ),
+        ("Makefile", "\tpw: ; psql -c 'CREATE USER bob'\n"),
+        (
+            ".gitlab-ci.yml",
+            "  script:\n    - psql -c 'GRANT pg_read_all_data TO ci_ro'\n",
+        ),
+        (
+            ".github/workflows/fix.yml",
+            "      - run: psql -c 'DROP TABLE users'\n",
+        ),
+        ("Dockerfile", "RUN psql -c 'GRANT ALL ON DATABASE app TO dev'\n"),
+    ],
+)
+def test_mutating_sql_file_denies_target_files(
+    workspace: Path, rel_path: str, snippet: str
+) -> None:
+    """Scripts, SQL files, Makefiles, CI configs, and Dockerfiles deny SQL."""
+    payload = _payload(workspace)
+    target = workspace / rel_path
+    assert "Section 3 Item A.5" in (
+        find_write_deny_reason(payload, str(target), snippet, "") or ""
+    )
+
+
+def test_mutating_sql_file_cites_only_psql_line_not_echo_above(
+    workspace: Path,
+) -> None:
+    """Contextual grant matching cites only the psql line, not prose above."""
+    payload = _payload(workspace)
+    script = workspace / "meta-platform/scripts/grant-check.sh"
+    body = "echo 'grant access to reader'\npsql -c 'grant admin to bob'\n"
+    reason = find_write_deny_reason(payload, str(script), body, "") or ""
+    assert "Section 3 Item A.5 lines 2." in reason
+
+
+def test_mutating_sql_file_extensionless_shebang_midfile(
+    workspace: Path,
+) -> None:
+    """Mid-file edits guard extensionless shebang scripts, not plain docs."""
+    payload = _payload(workspace)
+    tool = workspace / "tools/repair-db"
+    tool.parent.mkdir(parents=True, exist_ok=True)
+    tool.write_text("#!/usr/bin/env bash\necho ok\n", encoding="utf-8")
+    assert "Section 3 Item A.5" in (
+        find_write_deny_reason(
+            payload,
+            str(tool),
+            "DELETE FROM users;\n",
+            "",
+            before="echo ok\n",
+        )
+        or ""
+    )
+    notes = workspace / "tools/notes"
+    notes.write_text("plain text file\n", encoding="utf-8")
+    assert (
+        find_write_deny_reason(
+            payload,
+            str(notes),
+            "DELETE FROM users;\n",
+            "",
+            before="plain text file\n",
+        )
+        is None
+    )
+
+
+def test_guest_sql_command_catches_single_word_role_grant(
+    workspace: Path,
+) -> None:
+    """Guest psql commands catch single-word role grants and revokes."""
+    payload = _payload(workspace)
+    for cmd in (
+        "ssh harbor psql -c 'grant admin to bob'",
+        'psql -c "REVOKE writer FROM svc"',
+    ):
+        assert "Section 3 Item A.5" in (
+            find_write_deny_reason(payload, "", "", cmd) or ""
+        )
+
+
 def test_uncovered_repo_and_lockfile(workspace: Path) -> None:
     """Uncovered repos, image tags, and lockfiles are allowed."""
     payload = _payload(workspace)

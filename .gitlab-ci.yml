@@ -1,21 +1,24 @@
 ---
 include:
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/core@1.8.2
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_ROOT_NAMESPACE/gitlab-ci-with-code-reviewer/core@1.8.3
     inputs:
-      reviewer_image: $CI_REGISTRY/csning1998-lab/gitlab-ci-with-code-reviewer/reviewer:1.8.2
+      reviewer_image: $CI_REGISTRY/$CI_PROJECT_ROOT_NAMESPACE/gitlab-ci-with-code-reviewer/reviewer:1.8.3
       review_models:
         - "claude-sonnet-5.5"
         - "claude-opus-5.5"
+        - "gemini-4-carbon"
         - "gemini-4-argon"
         - "gemini-3.8-flash"
         - "azure-gpt-5.4-mini"
       enable_sonarqube: true
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/iac-terraform@1.8.2
+      # The group runner carries the tag and reaches SonarQube on the host network sonarqube-ci-net.
+      sonar_scanner_tags: ["sonarqube-network"]
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_ROOT_NAMESPACE/gitlab-ci-with-code-reviewer/iac-terraform@1.8.3
     inputs:
       # CKV_GLB_1, CKV_GLB_3, CKV_GLB_4: require GitLab Premium/Ultimate merge request approval and push rules.
-      # CKV_TF_1: enforces commit-pinned Git URLs; modules use immutable semantic versions from GitLab Terraform Registry.
+      # CKV_TF_1: enforces commit-pinned Git URLs. Modules use immutable semantic versions from GitLab Terraform Registry.
       checkov_skip: "CKV_GLB_1,CKV_GLB_3,CKV_GLB_4,CKV_TF_1"
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/lang-python@1.8.2
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_ROOT_NAMESPACE/gitlab-ci-with-code-reviewer/lang-python@1.8.3
     inputs:
       package_manager: uv
       python_image: ghcr.io/astral-sh/uv:python3.11-alpine
@@ -24,11 +27,16 @@ include:
         uv pip install pytest-cov --system &&
         pytest --cov=hooks --cov=skills --cov-report=xml:coverage.xml --junitxml=junit.xml
       test_stage: test
-  - component: $CI_SERVER_FQDN/csning1998-lab/gitlab-ci-with-code-reviewer/auto-tag@1.8.2
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_ROOT_NAMESPACE/gitlab-ci-with-code-reviewer/auto-tag@1.8.3
     inputs:
-      reviewer_image: $CI_REGISTRY/csning1998-lab/gitlab-ci-with-code-reviewer/reviewer:1.8.2
+      reviewer_image: $CI_REGISTRY/$CI_PROJECT_ROOT_NAMESPACE/gitlab-ci-with-code-reviewer/reviewer:1.8.3
 
+# The coverage run ignores python_globs because security:sonarqube reads coverage.xml on every merge request.
 test:python:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+    - if: "$CI_COMMIT_TAG"
   artifacts:
     when: always
     paths:
@@ -41,7 +49,6 @@ test:python:
 security:sonarqube:
   needs:
     - job: test:python
-      optional: true
   variables:
     SONAR_PYTHON_COVERAGE_REPORT_PATHS: coverage.xml
   script:

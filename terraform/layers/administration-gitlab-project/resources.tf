@@ -1,6 +1,6 @@
 
 data "gitlab_group" "personal" {
-  full_path = "csning1998-lab/platform-engineering-lab"
+  full_path = "${var.gitlab_top_level_group_path}/platform-engineering-lab"
 }
 
 resource "gitlab_project" "this" {
@@ -34,11 +34,13 @@ resource "gitlab_branch_protection" "main" {
 
 module "workload_identity_federation" {
   source  = "gitlab.com/csning1998-lab/provisioner-workload-identity-federation/gitlab"
-  version = "0.5.0"
+  version = "0.7.0"
+
+  gitlab_url = var.gitlab_url
 
   gitlab_project = {
     id   = gitlab_project.this.id
-    path = "csning1998-lab/platform-engineering-lab/generic-agent-criteria-source"
+    path = gitlab_project.this.path_with_namespace
     code = "generic-agent-criteria-source"
   }
 
@@ -60,19 +62,19 @@ module "workload_identity_federation" {
     cognitive_account_id = local.ai_provider["azure"].cognitive_account_id
     openai_endpoint      = local.ai_provider["azure"].openai_endpoint
     subjects = [
-      "project_path:csning1998-lab/platform-engineering-lab/generic-agent-criteria-source:ref_type:branch:ref:main",
-      "project_path:csning1998-lab/platform-engineering-lab/generic-agent-criteria-source:ref_type:branch:ref:chore/update-dependencies",
+      "project_path:${gitlab_project.this.path_with_namespace}:ref_type:branch:ref:main",
+      "project_path:${gitlab_project.this.path_with_namespace}:ref_type:branch:ref:chore/update-dependencies",
     ]
   }
 }
 
-module "code_reviewer" {
-  source    = "gitlab.com/csning1998-lab/provisioner-code-reviewer/gitlab"
-  version   = "~> 1.7.4"
-  providers = { vault = vault.bastion }
+# ./governance of parent-group-governance writes the reviewer CI variables. Terraform forgets the variables without deletion.
+removed {
+  from = module.code_reviewer
 
-  gitlab_project_id    = gitlab_project.this.id
-  legacy_alias_enabled = true
+  lifecycle {
+    destroy = false
+  }
 }
 
 module "github_mirror" {

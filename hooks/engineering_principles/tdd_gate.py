@@ -161,6 +161,7 @@ def find_tdd_write_deny_reason(
     if not is_tdd_production_path(path, workspace_root):
         return None
 
+    reconcile_tdd_pending_commands(payload)
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
     if stage == "green_authorized":
@@ -332,6 +333,101 @@ def record_tdd_command(
     return changed
 
 
+def _record_pending_command(
+    state: dict[str, Any], payload: dict[str, Any], command: str, stage: str
+) -> bool:
+    """Store un-flushed TDD command metadata for post-tool reconciliation."""
+    segments = parse_shell_command_segments(command)
+    is_tdd_cmd = any(
+        COMPOSITE_VERIFY_CMD_RE.search(s)
+        or TEST_RUNNER_CMD_RE.search(s)
+        or LINTER_CMD_RE.search(s)
+        for s in segments
+    )
+    if not is_tdd_cmd:
+        return False
+    pending = list(state.get("tdd_pending_commands") or [])
+    pending.append(
+        {
+            "command": command,
+            "step_idx": payload.get("stepIdx"),
+            "pre_stage": stage,
+            "pre_tests_passed_in_green": bool(
+                state.get("tdd_tests_passed_in_green")
+            ),
+            "pre_lint_verified": bool(state.get("tdd_lint_verified")),
+        }
+    )
+    state["tdd_pending_commands"] = pending[-10:]
+    return True
+
+
+def reconcile_tdd_pending_commands(payload: dict[str, Any]) -> None:
+    """Re-evaluate pending TDD commands once transcript/step outputs flush."""
+    state = load_state(payload)
+    pending = state.get("tdd_pending_commands")
+    if not isinstance(pending, list) or not pending:
+        return
+
+    transcript_path = payload.get("transcriptPath") or payload.get(
+        "transcript_path"
+    )
+    remaining: list[dict[str, Any]] = []
+    changed = False
+    for item in pending:
+        if not isinstance(item, dict):
+            changed = True
+            continue
+        cmd = str(item.get("command") or "")
+        step_idx = item.get("step_idx")
+        if (
+            not cmd
+            or isinstance(step_idx, bool)
+            or not isinstance(step_idx, int)
+        ):
+            changed = True
+            continue
+        probe = {
+            "transcriptPath": transcript_path,
+            "stepIdx": step_idx,
+            "toolInput": {"CommandLine": cmd},
+        }
+        outcome, output_text = load_command_execution_outcome(probe)
+        if outcome is None:
+            remaining.append(item)
+            continue
+        changed = True
+        if not outcome:
+            continue
+        pre_stage = str(
+            item.get("pre_stage") or state.get("tdd_stage") or "idle"
+        )
+        if pre_stage in {
+            "red_pending_verification",
+            "red_verified",
+            "premature_green",
+        }:
+            eval_stage = pre_stage
+        elif pre_stage == "green_authorized" and state.get(
+            "tdd_prod_mutated_in_green"
+        ):
+            state["tdd_stage"] = "green_authorized"
+            state["tdd_tests_passed_in_green"] = bool(
+                item.get("pre_tests_passed_in_green")
+            )
+            state["tdd_lint_verified"] = bool(item.get("pre_lint_verified"))
+            eval_stage = "green_authorized"
+        else:
+            eval_stage = str(state.get("tdd_stage") or "idle")
+        record_tdd_command(
+            state, cmd, True, eval_stage, output_text=output_text
+        )
+
+    if changed:
+        state["tdd_pending_commands"] = remaining[-10:]
+        persist_state(payload, state)
+
+
 def record_tdd_post_tool(
     payload: dict[str, Any], tool: str, path: str, command: str
 ) -> None:
@@ -355,6 +451,18 @@ def record_tdd_post_tool(
             has_error = (
                 outcome if outcome is not None else bool(payload.get("error"))
             )
+            if (
+                outcome is None
+                and not has_error
+                and (
+                    payload.get("transcriptPath")
+                    or payload.get("transcript_path")
+                )
+            ):
+                changed = (
+                    _record_pending_command(state, payload, command, stage)
+                    or changed
+                )
         else:
             has_error = bool(payload.get("error"))
             output_text = ""
@@ -433,6 +541,7 @@ def find_green_authorized_block_reason(
 
 def find_tdd_stop_block_reason(payload: dict[str, Any]) -> str | None:
     """Return stop reason when turn concludes without meeting TDD checks."""
+    reconcile_tdd_pending_commands(payload)
     state = load_state(payload)
     stage = state.get("tdd_stage", "idle")
     workspace_root = resolve_workspace_root(payload)
@@ -442,6 +551,7 @@ def find_tdd_stop_block_reason(payload: dict[str, Any]) -> str | None:
         if mods and not any(is_git_dirty_path(p, workspace_root) for p in mods):
             state["tdd_stage"] = "idle"
             state["tdd_modified_tests"] = []
+            state["tdd_pending_commands"] = []
             persist_state(payload, state)
             return None
 

@@ -38,6 +38,13 @@
                 ]
             }
         ],
+        "PostInvocation": [
+            {
+                "type": "command",
+                "command": "GROK_HOOK_EVENT=PostInvocation python3 '__REPO_ROOT__/hooks/bin/engineering-principles.py'",
+                "timeout": 15
+            }
+        ],
         "Stop": [
             {
                 "type": "command",

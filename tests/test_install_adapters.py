@@ -531,3 +531,7 @@ def test_install_agy_hooks_json_registers_ask_question_and_pre_invocation(
     assert cfg["PreInvocation"][0]["command"].startswith(
         "GROK_HOOK_EVENT=PreInvocation "
     )
+    assert "PostInvocation" in cfg
+    assert cfg["PostInvocation"][0]["command"].startswith(
+        "GROK_HOOK_EVENT=PostInvocation "
+    )

@@ -264,26 +264,86 @@ def _extract_direct_exit_code(payload: dict[str, Any]) -> int | None:
     return None
 
 
+def _inspect_command_output_text(text: str) -> bool | None:
+    """Inspect command output text for Antigravity exit status markers."""
+    match = COMMAND_EXIT_RE.search(text)
+    if match:
+        return int(match.group(1)) != 0
+    if "Encountered error in step execution" in text:
+        return True
+    return None
+
+
 def _inspect_generic_step_outcome(
     event: dict[str, Any],
 ) -> tuple[bool | None, str]:
     """Classify one transcript GENERIC step into (has_error, output_text)."""
     content = event.get("content")
     text = content if isinstance(content, str) else ""
-    match = COMMAND_EXIT_RE.search(text)
-    if match:
-        return int(match.group(1)) != 0, text
-    if event.get("status") == "ERROR" or (
-        "Encountered error in step execution" in text
-    ):
+    parsed = _inspect_command_output_text(text)
+    if parsed is not None:
+        return parsed, text
+    if event.get("status") == "ERROR":
         return True, text
     return None, text
+
+
+def _load_step_output_file(
+    transcript_path: Any, step_index: int
+) -> tuple[bool | None, str]:
+    """Read sibling .system_generated/steps/<idx>/output.txt if present."""
+    if not transcript_path:
+        return None, ""
+    tpath = Path(str(transcript_path))
+    step_file = tpath.parent.parent / "steps" / str(step_index) / "output.txt"
+    if not step_file.is_file():
+        return None, ""
+    try:
+        text = step_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, ""
+    return _inspect_command_output_text(text), text
+
+
+def _resolve_candidate_step_indices(
+    events: list[dict[str, Any]], step_idx: int, target_command: str
+) -> list[int]:
+    """Resolve GENERIC step indices for a tool step including parallel calls."""
+    planner_event: dict[str, Any] | None = None
+    for event in reversed(events):
+        if (
+            event.get("type") == "PLANNER_RESPONSE"
+            and event.get("step_index") == step_idx
+        ):
+            planner_event = event
+            break
+
+    if planner_event is None:
+        return [step_idx, step_idx + 1]
+
+    tool_calls = planner_event.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        if target_command:
+            matched: list[int] = []
+            for offset, call in enumerate(tool_calls):
+                if not isinstance(call, dict):
+                    continue
+                args = call.get("args") or call.get("arguments") or {}
+                if isinstance(args, dict) and (
+                    extract_command(args).strip() == target_command.strip()
+                ):
+                    matched.append(step_idx + 1 + offset)
+            if matched:
+                return matched
+        return [step_idx + 1 + pos for pos in range(len(tool_calls))]
+
+    return [step_idx, step_idx + 1]
 
 
 def load_command_execution_outcome(
     payload: dict[str, Any],
 ) -> tuple[bool | None, str]:
-    """Return (has_error, output_text) from payload or transcript step."""
+    """Return (has_error, output_text) from payload, steps dir, or logs."""
     error = payload.get("error")
     if error:
         return True, str(error)
@@ -291,14 +351,15 @@ def load_command_execution_outcome(
     if exit_code is not None:
         return exit_code != 0, ""
 
+    step_idx = payload.get("stepIdx")
+    if not isinstance(step_idx, int) or isinstance(step_idx, bool):
+        return None, ""
+
     transcript_path = payload.get("transcriptPath") or payload.get(
         "transcript_path"
     )
+    target_command = extract_command(extract_tool_input(payload))
     lines = _load_transcript_lines(transcript_path)
-    if not lines:
-        return None, ""
-
-    step_idx = payload.get("stepIdx")
     events: list[dict[str, Any]] = []
     for raw in lines:
         stripped = raw.strip()
@@ -311,13 +372,20 @@ def load_command_execution_outcome(
         if isinstance(obj, dict):
             events.append(obj)
 
-    if isinstance(step_idx, int) and not isinstance(step_idx, bool):
-        candidates = {step_idx, step_idx + 1}
-        for event in reversed(events):
-            if event.get("type") != "GENERIC":
-                continue
-            if event.get("step_index") in candidates:
-                outcome, text = _inspect_generic_step_outcome(event)
-                if outcome is not None:
-                    return outcome, text
+    candidates = _resolve_candidate_step_indices(
+        events, step_idx, target_command
+    )
+    for cand in candidates:
+        step_outcome, step_text = _load_step_output_file(transcript_path, cand)
+        if step_outcome is not None:
+            return step_outcome, step_text
+
+    candidate_set = set(candidates)
+    for event in reversed(events):
+        if event.get("type") != "GENERIC":
+            continue
+        if event.get("step_index") in candidate_set:
+            outcome, text = _inspect_generic_step_outcome(event)
+            if outcome is not None:
+                return outcome, text
     return None, ""

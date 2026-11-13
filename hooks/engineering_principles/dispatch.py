@@ -39,6 +39,7 @@ from engineering_principles.state import persist_state
 from engineering_principles.state import resolve_workspace_root
 from engineering_principles.tdd_gate import find_tdd_stop_block_reason
 from engineering_principles.tdd_gate import find_tdd_write_deny_reason
+from engineering_principles.tdd_gate import reconcile_tdd_pending_commands
 from engineering_principles.tdd_gate import record_tdd_post_tool
 from engineering_principles.tdd_gate import record_tdd_prompt_authorization
 
@@ -320,15 +321,21 @@ def intercept_stop(payload: dict[str, Any]) -> int:
 
 
 def intercept_user_prompt(payload: dict[str, Any]) -> int:
-    """Record leave phrases, auth, and reset Stop loop counters."""
+    """Record leave phrases, auth, and reset Stop counters on new turns."""
+    event = normalize_event(payload)
     transcript_prompt, turn_key = load_latest_user_request_record(payload)
     prompt = extract_prompt_text(payload) or transcript_prompt
     state = load_state(payload)
-    if (
+    turn_changed = bool(
+        turn_key and turn_key != state.get("last_stop_turn_key")
+    )
+    prompt_changed = bool(prompt and prompt != state.get("last_prompt"))
+    is_new_turn = event == "userpromptsubmit" or turn_changed or prompt_changed
+    if is_new_turn and (
         state.get("stop_block_count")
         or state.get("last_stop_block_reason")
-        or (turn_key and turn_key != state.get("last_stop_turn_key"))
-        or (prompt and prompt != state.get("last_prompt"))
+        or turn_changed
+        or prompt_changed
     ):
         state["stop_block_count"] = 0
         state["last_stop_block_reason"] = ""
@@ -340,6 +347,12 @@ def intercept_user_prompt(payload: dict[str, Any]) -> int:
     if prompt:
         record_leave(payload, prompt)
         record_tdd_prompt_authorization(payload, prompt, turn_key=turn_key)
+    return 0
+
+
+def intercept_post_invocation(payload: dict[str, Any]) -> int:
+    """Reconcile pending TDD command results after tool batch finishes."""
+    reconcile_tdd_pending_commands(payload)
     return 0
 
 
@@ -358,6 +371,8 @@ def dispatch(payload: dict[str, Any]) -> int:
         return intercept_pre_tool_use(payload)
     if event == "posttooluse":
         return intercept_post_tool_use(payload)
+    if event == "postinvocation":
+        return intercept_post_invocation(payload)
     if event in {"userpromptsubmit", "preinvocation"}:
         return intercept_user_prompt(payload)
     if event == "sessionstart":

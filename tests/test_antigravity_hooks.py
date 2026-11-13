@@ -1547,3 +1547,328 @@ def test_dispatch_pre_invocation_records_prompt_and_resets_stop_counter(
     updated = load_state(payload)
     assert updated["last_prompt"] == "請調整文件"
     assert updated["stop_block_count"] == 0
+
+
+def test_load_command_outcome_handles_parallel_tool_calls_offset(
+    tmp_path: Path,
+) -> None:
+    """Resolve GENERIC step beyond step_idx+1 when parallel calls occur."""
+    from engineering_principles.payload import load_command_execution_outcome
+
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "step_index": 10,
+                        "type": "PLANNER_RESPONSE",
+                        "tool_calls": [
+                            {
+                                "name": "read_file",
+                                "arguments": {"Path": "/tmp/a.py"},
+                            },
+                            {
+                                "name": "run_command",
+                                "arguments": {
+                                    "CommandLine": "uv run pytest tests/x.py"
+                                },
+                            },
+                        ],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step_index": 11,
+                        "type": "GENERIC",
+                        "status": "DONE",
+                        "content": "Shown lines 1-10",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step_index": 12,
+                        "type": "GENERIC",
+                        "status": "DONE",
+                        "content": "Command exited with code 1.\n1 failed",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    payload = {
+        **_agy_payload(
+            "run_command",
+            {"CommandLine": "uv run pytest tests/x.py"},
+            transcript_path=str(transcript),
+        ),
+        "stepIdx": 10,
+    }
+    has_error, output_text = load_command_execution_outcome(payload)
+    assert has_error is True
+    assert "Command exited with code 1." in output_text
+
+
+def test_load_command_outcome_matches_specific_parallel_run_command(
+    tmp_path: Path,
+) -> None:
+    """Match the specific parallel run_command instead of taking the last."""
+    from engineering_principles.payload import load_command_execution_outcome
+
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "step_index": 20,
+                        "type": "PLANNER_RESPONSE",
+                        "tool_calls": [
+                            {
+                                "name": "run_command",
+                                "arguments": {
+                                    "CommandLine": "uv run ruff check ."
+                                },
+                            },
+                            {
+                                "name": "run_command",
+                                "arguments": {
+                                    "CommandLine": "uv run pytest tests/x.py"
+                                },
+                            },
+                        ],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step_index": 21,
+                        "type": "GENERIC",
+                        "status": "DONE",
+                        "content": (
+                            "Command exited with code 0.\nAll checks passed!"
+                        ),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step_index": 22,
+                        "type": "GENERIC",
+                        "status": "DONE",
+                        "content": "Command exited with code 1.\n1 failed",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    lint_payload = {
+        **_agy_payload(
+            "run_command",
+            {"CommandLine": "uv run ruff check ."},
+            transcript_path=str(transcript),
+        ),
+        "stepIdx": 20,
+    }
+    lint_err, lint_out = load_command_execution_outcome(lint_payload)
+    assert lint_err is False
+    assert "All checks passed!" in lint_out
+
+    test_payload = {
+        **_agy_payload(
+            "run_command",
+            {"CommandLine": "uv run pytest tests/x.py"},
+            transcript_path=str(transcript),
+        ),
+        "stepIdx": 20,
+    }
+    test_err, test_out = load_command_execution_outcome(test_payload)
+    assert test_err is True
+    assert "1 failed" in test_out
+
+
+def test_pre_invocation_same_turn_preserves_stop_block_count(
+    agy_workspace: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Same-turn PreInvocation continuations must not wipe stop_block_count."""
+    from engineering_principles.dispatch import dispatch
+
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps({"step_index": 1, "type": "USER_INPUT", "content": "測"})
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("sys.argv", ["ep"])
+    test_file = agy_workspace / "tests" / "test_loop.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_x():\n    assert False\n", encoding="utf-8")
+
+    pre_inv = {
+        **_agy_payload("", {}, workspace_paths=[str(agy_workspace)]),
+        "hookEventName": "PreInvocation",
+        "transcriptPath": str(transcript),
+        "lastUserInput": "測",
+    }
+    assert dispatch(pre_inv) == 0
+
+    state = load_state(pre_inv)
+    state["tdd_stage"] = "premature_green"
+    state["tdd_modified_tests"] = [str(test_file)]
+    persist_state(pre_inv, state)
+
+    stop_first = {
+        **_agy_payload("", {}, workspace_paths=[str(agy_workspace)]),
+        "hookEventName": "Stop",
+        "transcriptPath": str(transcript),
+        "terminationReason": "NO_TOOL_CALL",
+        "continuationActive": False,
+    }
+    assert dispatch(stop_first) == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "continue"
+    assert load_state(pre_inv)["stop_block_count"] == 1
+
+    # Antigravity fires PreInvocation again on the same turn before continuing.
+    assert dispatch(pre_inv) == 0
+    assert load_state(pre_inv)["stop_block_count"] == 1
+
+    stop_second = {**stop_first, "continuationActive": True}
+    assert dispatch(stop_second) == 0
+    assert capsys.readouterr().out == ""
+
+    transcript.write_text(
+        transcript.read_text(encoding="utf-8")
+        + json.dumps({"step_index": 5, "type": "USER_INPUT", "content": "新"})
+        + "\n",
+        encoding="utf-8",
+    )
+    pre_next = {**pre_inv, "lastUserInput": "新"}
+    assert dispatch(pre_next) == 0
+    assert load_state(pre_inv)["stop_block_count"] == 0
+
+
+def test_load_command_outcome_reads_steps_output_when_transcript_unflushed(
+    tmp_path: Path,
+) -> None:
+    """Fall back to .system_generated/steps/<idx>/output.txt before flush."""
+    from engineering_principles.payload import load_command_execution_outcome
+
+    sys_gen = tmp_path / ".system_generated"
+    logs_dir = sys_gen / "logs"
+    step_dir = sys_gen / "steps" / "101"
+    logs_dir.mkdir(parents=True)
+    step_dir.mkdir(parents=True)
+    transcript = logs_dir / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "step_index": 100,
+                "type": "PLANNER_RESPONSE",
+                "tool_calls": [
+                    {
+                        "name": "run_command",
+                        "arguments": {"CommandLine": "uv run pytest"},
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (step_dir / "output.txt").write_text(
+        "Command exited with code 1.\n1 failed\n", encoding="utf-8"
+    )
+    payload = {
+        **_agy_payload(
+            "run_command",
+            {"CommandLine": "uv run pytest"},
+            transcript_path=str(transcript),
+        ),
+        "stepIdx": 100,
+    }
+    has_error, output_text = load_command_execution_outcome(payload)
+    assert has_error is True
+    assert "Command exited with code 1." in output_text
+
+
+def test_stop_reconciles_late_flushed_transcript_command_failure(
+    agy_workspace: Path, tmp_path: Path
+) -> None:
+    """Reconcile pending command failure once transcript flushes before Stop."""
+    from engineering_principles.dispatch import dispatch
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True)
+    transcript = logs_dir / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "step_index": 200,
+                "type": "PLANNER_RESPONSE",
+                "tool_calls": [
+                    {
+                        "name": "run_command",
+                        "arguments": {
+                            "CommandLine": "uv run pytest tests/a.py"
+                        },
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    test_file = agy_workspace / "tests" / "test_a.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_a():\n    assert False\n", encoding="utf-8")
+
+    post_tool = {
+        **_agy_payload(
+            "run_command",
+            {"CommandLine": "uv run pytest tests/a.py"},
+            workspace_paths=[str(agy_workspace)],
+            transcript_path=str(transcript),
+        ),
+        "hookEventName": "PostToolUse",
+        "stepIdx": 200,
+    }
+    state = load_state(post_tool)
+    state["tdd_stage"] = "red_pending_verification"
+    state["tdd_modified_tests"] = [str(test_file)]
+    state["tdd_lint_verified"] = True
+    persist_state(post_tool, state)
+
+    # Step 201 not flushed yet during PostToolUse.
+    assert dispatch(post_tool) == 0
+
+    # Transcript receives step 201 before Stop runs.
+    transcript.write_text(
+        transcript.read_text(encoding="utf-8")
+        + json.dumps(
+            {
+                "step_index": 201,
+                "type": "GENERIC",
+                "status": "DONE",
+                "content": "Command exited with code 1.\n1 failed",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    stop_payload = {
+        **_agy_payload(
+            "",
+            {},
+            workspace_paths=[str(agy_workspace)],
+            transcript_path=str(transcript),
+        ),
+        "hookEventName": "Stop",
+        "terminationReason": "NO_TOOL_CALL",
+    }
+    assert find_tdd_stop_block_reason(stop_payload) is None
+    assert load_state(stop_payload)["tdd_stage"] == "red_verified"

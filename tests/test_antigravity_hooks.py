@@ -1381,23 +1381,38 @@ def test_intercept_stop_continuation_repeat_reason_breaks_loop(
 
 def test_is_git_dirty_path_nested_repo_clean_file_returns_false(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resolve nested git root cleanly when parent workspace is non-git."""
     parent_ws = tmp_path / "parent_ws"
     repo = parent_ws / "sub" / "repo"
     test_file = repo / "tests" / "test_demo.py"
     test_file.parent.mkdir(parents=True)
+    (repo / ".git").mkdir()
     test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
 
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "t@example.com"], cwd=repo, check=True
-    )
-    subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
-    subprocess.run(["git", "add", "."], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout="", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert is_git_dirty_path(str(test_file), parent_ws) is False
+    assert captured["cwd"] == repo
+    assert captured["cmd"] == [
+        "git",
+        "status",
+        "--porcelain",
+        "--",
+        str(test_file),
+    ]
 
 
 @pytest.mark.parametrize(

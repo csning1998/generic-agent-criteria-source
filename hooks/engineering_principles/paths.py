@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from engineering_principles.config import ARCHITECTURE_STEM_RE
 from engineering_principles.config import BOOTSTRAPPER_NAME_RE
 from engineering_principles.config import GENERIC_MODULE_RE
 from engineering_principles.config import GOVERNED_DIR_PARTS
 from engineering_principles.config import SECRET_MINT_LAYER_RE
+from engineering_principles.sql_targets import BUILD_AND_CI_NAMES
+from engineering_principles.sql_targets import BUILD_AND_CI_PREFIXES
+from engineering_principles.sql_targets import CI_DIR_PAIRS
+from engineering_principles.sql_targets import DOC_AND_DATA_SUFFIXES
+from engineering_principles.sql_targets import EXECUTABLE_AND_CI_DIRS
+from engineering_principles.sql_targets import SCRIPT_AND_SQL_SUFFIXES
 
 
 def normalize_posix(path: str) -> str:
@@ -134,3 +141,64 @@ def is_planning_gate_required(path: str, planning: Path | None) -> bool:
     if not tokens:
         return True
     return any(token in posix_path for token in tokens)
+
+
+def _normalize_template_path(path: str) -> PurePosixPath:
+    """Return POSIX path normalized without a trailing .j2 template suffix."""
+    pure = PurePosixPath(normalize_posix(path))
+    if pure.suffix.lower() == ".j2" and pure.stem:
+        return pure.with_name(pure.stem)
+    return pure
+
+
+def is_sql_document_path(path: str) -> bool:
+    """Return True when the path targets a SQL source or SQL template file."""
+    return (
+        bool(path) and _normalize_template_path(path).suffix.lower() == ".sql"
+    )
+
+
+def _has_shebang_header(path: str, text: str) -> bool:
+    """Return True when new text or existing disk file starts with a shebang."""
+    if text.lstrip("\ufeff").startswith("#!"):
+        return True
+    if not path:
+        return False
+    candidate = Path(path).expanduser()
+    try:
+        if candidate.is_file():
+            with candidate.open("rb") as handle:
+                head = handle.read(128)
+            return head.lstrip(b"\xef\xbb\xbf").startswith(b"#!")
+    except OSError:
+        return False
+    return False
+
+
+def is_mutating_sql_file_target(path: str, text: str = "") -> bool:
+    """Return True if path is an executable, build, CI, or SQL target."""
+    if not path:
+        return False
+    pure = _normalize_template_path(path)
+    parts_lower = [part.lower() for part in pure.parts]
+    if ".git" in parts_lower:
+        return False
+    name = pure.name.lower()
+    suffix = pure.suffix.lower()
+    if suffix in DOC_AND_DATA_SUFFIXES or name.startswith(".env."):
+        return False
+    if suffix == "" and name in {"readme", "license", "changelog", "notice"}:
+        return False
+    if suffix in SCRIPT_AND_SQL_SUFFIXES:
+        return True
+    if name in BUILD_AND_CI_NAMES or name.startswith(BUILD_AND_CI_PREFIXES):
+        return True
+    parents = parts_lower[:-1]
+    if any(part in EXECUTABLE_AND_CI_DIRS for part in parents):
+        return True
+    if any(
+        (parents[idx], parents[idx + 1]) in CI_DIR_PAIRS
+        for idx in range(len(parents) - 1)
+    ):
+        return True
+    return suffix == "" and _has_shebang_header(path, text)

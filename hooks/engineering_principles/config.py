@@ -45,18 +45,38 @@ IAC_SQL_RE = re.compile(
     r"\bALTER\s+(?:USER|ROLE)\b)",
     re.I,
 )
+_SQL_IDENT = r"(?:\"[^\"]+\"|[a-zA-Z_][\w.\"$]*)"
+_SQL_PRIV = (
+    r"(?:SELECT|INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER|"
+    r"CREATE|CONNECT|TEMPORARY|TEMP|EXECUTE|USAGE|MAINTAIN|"
+    r"ALTER\s+SYSTEM)(?:\s*\([^)]+\))?"
+)
+_PREPOSITION_STOP = (
+    r"(?:for|in|of|from|to|with|on|by|at|as|and|or|the|a|an|if)"
+)
 MUTATING_SQL_RE = re.compile(
     r"("
     r"\bALTER\s+(?:USER|ROLE)\b"
     r"|\bINSERT\s+INTO\b"
-    r"|\bUPDATE\s+\S+\s+SET\b"
+    rf"|\bUPDATE\s+{_SQL_IDENT}\s+"
+    rf"(?:(?:AS\s+)?[a-zA-Z_]\w*\s+)?SET\s+(?:\([^)]+\)|{_SQL_IDENT})\s*="
     r"|\bDELETE\s+FROM\b"
-    r"|\bTRUNCATE\s+"
+    rf"|\bTRUNCATE\s+(?:TABLE\s+{_SQL_IDENT}|"
+    rf"(?:ONLY\s+)?(?!{_PREPOSITION_STOP}\b){_SQL_IDENT}"
+    r"(?:\s*(?:;|,|'|\"|$)|\s+(?:RESTART|CONTINUE|CASCADE|RESTRICT)\b))"
     r"|\bDROP\s+(?:DATABASE|TABLE|USER|ROLE|SCHEMA)\b"
-    r"|\bCREATE\s+(?:USER|ROLE)\b"
-    r"|\bGRANT\s+"
-    r"|\bREVOKE\s+"
+    rf"|\bCREATE\s+(?:USER|ROLE)\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    rf"(?!{_PREPOSITION_STOP}\b){_SQL_IDENT}"
+    r"|\b(?:GRANT|REVOKE(?:\s+GRANT\s+OPTION\s+FOR)?)\s+"
+    rf"(?:ALL(?:\s+PRIVILEGES)?|{_SQL_PRIV}(?:\s*,\s*{_SQL_PRIV})*)\s+ON\b"
+    r"|\b(?:GRANT|REVOKE(?:\s+ADMIN\s+OPTION\s+FOR)?)\s+"
+    r"(?:pg_\w+|[a-zA-Z_][\w$]*_[a-zA-Z0-9_$]+|\"[^\"]+\")\s+"
+    rf"(?:TO|FROM)\s+(?!(?:the|a|an)\b){_SQL_IDENT}"
     r")",
+    re.I,
+)
+SQL_GRANT_REVOKE_RE = re.compile(
+    rf"\b(?:GRANT|REVOKE)\s+(?:ALL\b|{_SQL_IDENT}\s+(?:ON|TO|FROM)\b)",
     re.I,
 )
 GUEST_SQL_CMD_RE = re.compile(
